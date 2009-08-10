@@ -13,7 +13,8 @@
 
 ;; Sources
 
-(def sources (atom []))
+(def #^{:doc "Atom containing a vector of repository URLs."}
+  sources (atom []))
 
 (def #^{:private true}
   source-type-regex #"(^[a-z0-9.-]+)\+")
@@ -32,7 +33,7 @@
     (.replaceAll "")))
 
 (defmulti read-source
-  "Reads package metadata from a source."
+  "Reads package metadata from a source URL."
   get-source-type)
 
 (defmethod read-source "capra"
@@ -43,21 +44,14 @@
     (read reader)))
 
 (defn read-all-sources
-  "Reads all sources in capra.package/sources"
+  "Reads all sources in capra.package/sources."
   []
   (apply merge (map read-source @sources)))
 
 ;; Packages
 
-(defn- matches-version?
-  "Returns true if the version matches the package."
-  [version package]
-  (= (package :version) version))
-
-(defn find
-  "Finds a package in the repository"
+(defn find-exact
+  "Finds a package in the repository for a specific version number."
   [name version]
-  (let [repository (read-all-sources)
-        packages   (repository name)]
-    (first (filter (partial matches-version? version)
-                   packages))))
+  (let [repository (read-all-sources)]
+    (repository [name version])))
