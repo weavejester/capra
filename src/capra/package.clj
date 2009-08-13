@@ -1,6 +1,6 @@
 (ns capra.package
   "An extensible package manager for Clojure."
-  (:refer-clojure :exclude [list find])
+  (:refer-clojure :exclude [list get find])
   (:use capra.interface)
   (:use clojure.contrib.def))
 
@@ -29,11 +29,27 @@
   (let [[_ type url] (re-matches source-regex source)]
     [(keyword type) url]))
 
+(defn- src->
+  "Turn a capra.interface function into one that takes a single source URL."
+  [func & args]
+  (fn [source]
+    (let [[type url] (split-source source)]
+      (apply func type url args))))
+
+(defn- first-not-nil
+  "Return the first value that is not nil."
+  [coll]
+  (first (remove nil? coll)))
+
 ;; Packages
 
 (defn list
   "Return a list of all package names and versions."
   []
-  (set (mapcat
-         #(apply list-packages (split-source %))
-         @sources)))
+  (set (mapcat (src-> list-packages) @sources)))
+
+(defn get
+  "Get a specific package by name and version."
+  [name version]
+  (first-not-nil
+    (map (src-> get-package name version) @sources)))
