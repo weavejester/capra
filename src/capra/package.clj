@@ -1,9 +1,8 @@
 (ns capra.package
   "An extensible package manager for Clojure."
-  (:refer-clojure :exclude [find])
-  (:import java.net.URL)
-  (:import java.io.InputStreamReader)
-  (:import java.io.PushbackReader))
+  (:refer-clojure :exclude [list find])
+  (:use capra.interface)
+  (:use clojure.contrib.def))
 
 ;; Environment
 
@@ -13,45 +12,28 @@
 
 ;; Sources
 
-(def #^{:doc "Atom containing a vector of repository URLs."}
-  sources (atom []))
+(defvar sources (atom [])
+  "Atom containing a vector of repository URLs.")
 
-(def #^{:private true}
-  source-type-regex #"(^[a-z0-9.-]+)\+")
-
-(defn- get-source-type
-  "Gets the type of the source. The type is encoded in the scheme of the URL.
-  For example, the type of 'capra+http://example.com' is 'capra'."
+(defn add-source
+  "Add a source URL to the end of capra.package/sources."
   [source]
-  (second (re-find source-type-regex source)))
+  (swap! sources conj source))
 
-(defn- strip-source-type
-  "Strips the source type from the URL. For example, 'capra+http://example.com'
-  becomes 'http://example.com'."
-  [url]
-  (-> (re-matcher source-type-regex url)
-    (.replaceAll "")))
+(defvar- source-regex #"^([a-z0-9.-]+)\+(.*)$"
+  "Regular expression to split source type from source URL.")
 
-(defmulti read-source
-  "Reads package metadata from a source URL."
-  get-source-type)
-
-(defmethod read-source "capra"
+(defn- split-source
+  "Split the source type from a source URL."
   [source]
-  (let [url    (strip-source-type source)
-        stream (.openStream (URL. url))
-        reader (PushbackReader. (InputStreamReader. stream))]
-    (read reader)))
-
-(defn read-all-sources
-  "Reads all sources in capra.package/sources."
-  []
-  (apply merge (map read-source @sources)))
+  (let [[_ type url] (re-matches source-regex source)]
+    [(keyword type) url]))
 
 ;; Packages
 
-(defn find-exact
-  "Finds a package in the repository for a specific version number."
-  [name version]
-  (let [repository (read-all-sources)]
-    (repository [name version])))
+(defn list
+  "Return a list of all package names and versions."
+  []
+  (set (mapcat
+         #(apply list-packages (split-source %))
+         @sources)))
