@@ -44,12 +44,33 @@
 ;; Packages
 
 (defn list
-  "Return a list of all package names and versions."
+  "Return a list of all the latest package names and versions."
   []
   (set (mapcat (src-> list-packages) @sources)))
+
+(defn- version-map
+  "Return a map association package names with versions."
+  []
+  (reduce
+    (fn [m [k v]] (assoc m k v))
+    {}
+    (list)))
 
 (defn get
   "Get a specific package by name and version."
   [name version]
   (first-not-nil
     (map (src-> get-package name version) @sources)))
+
+(defn- get-latest
+  "Get the latest package by name."
+  [name]
+  (if-let [version ((version-map) name)]
+    (get name version)))
+
+(defn find
+  "Find a package by name and an optional range of versions."
+  ([name]
+    (get-latest name))
+  ([name version-range]
+    :todo))
