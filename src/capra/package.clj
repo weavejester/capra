@@ -2,13 +2,18 @@
   "An extensible package manager for Clojure."
   (:refer-clojure :exclude [list get find])
   (:use capra.interface)
-  (:use clojure.contrib.def))
+  (:use clojure.contrib.def)
+  (:use clojure.contrib.duck-streams)
+  (:use clojure.contrib.java-utils))
 
 ;; Environment
 
-(def *home-dir*
+(defvar *home-dir*
   (or (System/getenv "CAPRA_HOME")
       (System/getenv "HOME")))
+
+(defvar *package-dir*
+  (file *home-dir* ".capra" "packages"))
 
 ;; Sources
 
@@ -43,34 +48,27 @@
 
 ;; Packages
 
-(defn list
-  "Return a list of all the latest package names and versions."
-  []
-  (set (mapcat (src-> list-packages) @sources)))
-
-(defn- version-map
-  "Return a map association package names with versions."
-  []
-  (reduce
-    (fn [m [k v]] (assoc m k v))
-    {}
-    (list)))
-
 (defn get
   "Get a specific package by name and version."
   [name version]
   (first-not-nil
     (map (src-> get-package name version) @sources)))
 
-(defn- get-latest
-  "Get the latest package by name."
-  [name]
-  (if-let [version ((version-map) name)]
-    (get name version)))
+(defn download
+  "Download the jar from a single package jar. Returns the new package
+  filepath."
+  [package]
+  (let [filename (str (package :name) "-" (package :version) ".jar")
+        filepath (file *package-dir* filename)
+        stream   (.openStream (as-url (package :url)))]
+    (copy stream filepath)
+    filepath))
 
-(defn find
-  "Find a package by name and an optional range of versions."
-  ([name]
-    (get-latest name))
-  ([name version-range]
-    :todo))
+(defn install
+  "Downloads the package and all dependencies, then adds them to the
+  classpath."
+  [name version]
+  (let [package (get name version)]
+    (doseq [dependency (package :dependencies)]
+      (apply install dependency))
+    (add-classpath (.toURL (download package)))))
