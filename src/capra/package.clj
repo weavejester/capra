@@ -1,7 +1,7 @@
 (ns capra.package
   "An extensible package manager for Clojure."
   (:refer-clojure :exclude [list get find])
-  (:use capra.interface)
+  (:use capra.adapter)
   (:use clojure.contrib.def)
   (:use clojure.contrib.duck-streams)
   (:use clojure.contrib.java-utils))

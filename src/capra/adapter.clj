@@ -1,4 +1,4 @@
-(ns capra.interface
+(ns capra.adapter
   "Multimethods used for reading a package repository. Can be overridden to
   support different repository types.")
 
