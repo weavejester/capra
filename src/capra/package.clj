@@ -68,6 +68,7 @@
   "Downloads the package and all dependencies, then adds them to the
   classpath."
   [name version]
+  (println "Installing" name version)
   (let [package (get name version)]
     (doseq [dependency (package :dependencies)]
       (apply install dependency))
