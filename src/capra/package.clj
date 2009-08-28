@@ -48,6 +48,20 @@
 
 ;; Packages
 
+(defvar cache (atom {})
+  "A map of cached packages currently in the classpath.")
+
+(defn cached?
+  "Is a package already is the cache?"
+  [name version]
+  (contains? @cache [name version]))
+
+(defn- add-to-cache!
+  "Add a package to the package cache."
+  [package]
+  (let [key [(package :name) (package :version)]]
+    (swap! cache assoc key package)))
+
 (defn get
   "Get a specific package by name and version."
   [name version]
@@ -81,9 +95,11 @@
   "Downloads the package and all dependencies, then adds them to the
   classpath."
   [name version]
-  (println "Installing" name version)
-  (let [package (get name version)]
-    (doseq [dependency (package :dependencies)]
-      (apply install dependency))
-    (doseq [filepath (download package)]
-      (add-classpath (.toURL filepath)))))
+  (when-not (cached? name version)
+    (println "Installing" name version)
+    (let [package (get name version)]
+      (add-to-cache! package)
+      (doseq [dependency (package :dependencies)]
+        (apply install dependency))
+      (doseq [filepath (download package)]
+        (add-classpath (.toURL filepath))))))
