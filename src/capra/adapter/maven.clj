@@ -3,7 +3,8 @@
   (:use capra.adapter)
   (:require [clojure.xml :as xml])
   (:use [clojure.zip :only (xml-zip)])
-  (:use clojure.contrib.zip-filter.xml))
+  (:use clojure.contrib.zip-filter.xml)
+  (:use clojure.contrib.duck-streams))
 
 (defn- url-prefix
   "Given a four-part Maven ID, return the common URL prefix."
@@ -24,10 +25,11 @@
   (let [[group artifact] (split-name name)]
     [source group artifact version]))
 
-(defn- jar-url
-  "Return the URL for the Maven jar file."
-  [maven-id]
-  (str (url-prefix maven-id) ".jar"))
+(defn- get-file-sha1
+  "Retrieve the SHA1 of a file referenced by a URL."
+  [url]
+  (let [content (slurp* (str url ".sha1"))]
+    (re-find #"^[0-9a-fA-F]+" content)))
 
 (defn- fetch-pom
   "Get the Maven POM file of the package."
@@ -54,8 +56,10 @@
 (defmethod get-package :mvn
   [_ source name version]
   (let [maven-id (get-maven-id source name version)
-        pom-xml  (fetch-pom maven-id)]
+        pom-xml  (fetch-pom maven-id)
+        file-url (str (url-prefix maven-id) ".jar")]
     {:name    name
      :version version
-     :url     (jar-url maven-id)
+     :files   [{:url  file-url
+                :sha1 (get-file-sha1 file-url)}]
      :dependencies (read-deps pom-xml)}))

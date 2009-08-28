@@ -58,11 +58,13 @@
   "Download the jar from a single package jar. Returns the new package
   filepath."
   [package]
-  (let [filename (str (package :name) "-" (package :version) ".jar")
-        filepath (file *package-dir* filename)
-        stream   (.openStream (as-url (package :url)))]
-    (copy stream filepath)
-    filepath))
+  (doall
+    (for [file-info (package :files)]
+      (let [filename (str (file-info :sha1) ".jar")
+            filepath (file *package-dir* filename)
+            stream   (.openStream (as-url (file-info :url)))]
+        (copy stream filepath)
+        filepath))))
 
 (defn install
   "Downloads the package and all dependencies, then adds them to the
@@ -72,4 +74,5 @@
   (let [package (get name version)]
     (doseq [dependency (package :dependencies)]
       (apply install dependency))
-    (add-classpath (.toURL (download package)))))
+    (doseq [filepath (download package)]
+      (add-classpath (.toURL filepath)))))
