@@ -54,16 +54,27 @@
   (first-not-nil
     (map (src-> get-package name version) @sources)))
 
+(defn- download-path
+  "Return the download path for a file."
+  [file-info]
+  (file *package-dir*
+        (str (file-info :sha1) ".jar")))
+
+(defn- copy-url
+  "Copy the contents of a URL to a filepath."
+  [url filepath]
+  (copy (.openStream (as-url url))
+        filepath))
+
 (defn download
   "Download the jar from a single package jar. Returns the new package
   filepath."
   [package]
   (doall
     (for [file-info (package :files)]
-      (let [filename (str (file-info :sha1) ".jar")
-            filepath (file *package-dir* filename)
-            stream   (.openStream (as-url (file-info :url)))]
-        (copy stream filepath)
+      (let [filepath (download-path file-info)]
+        (when-not (.exists filepath)
+          (copy-url (file-info :url) filepath))
         filepath))))
 
 (defn install
