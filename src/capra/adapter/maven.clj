@@ -57,7 +57,7 @@
 (defn- read-deps
   "Read the dependencies from the Maven POM XML."
   [pom-xml]
-  (xml-> (xml-zip pom-xml)
+  (xml-> pom-xml
     :dependencies
     :dependency
     parse-dep))
@@ -65,10 +65,11 @@
 (defmethod get-package :mvn
   [_ source name version]
   (let [maven-id (get-maven-id source name version)
-        pom-xml  (fetch-pom maven-id)
+        pom-xml  (xml-zip (fetch-pom maven-id))
         file-url (str (url-prefix maven-id) ".jar")]
     {:name    name
      :version version
-     :files   [{:url  file-url
-                :sha1 (get-file-sha1 file-url)}]
+     :description (xml1-> pom-xml :description text)
+     :files [{:url  file-url
+              :sha1 (get-file-sha1 file-url)}]
      :dependencies (read-deps pom-xml)}))
