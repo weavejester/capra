@@ -1,6 +1,7 @@
 (ns capra.adapter.maven
   "Adapter for accessing Maven repositories."
   (:use capra.adapter)
+  (:use capra.util)
   (:require [clojure.xml :as xml])
   (:use [clojure.zip :only (xml-zip)])
   (:use clojure.contrib.zip-filter.xml)
@@ -37,13 +38,21 @@
   (let [url (str (url-prefix maven-id) ".pom")]
     (xml/parse url)))
 
+(defn- ignore-dep?
+  "True if dependency can be ignored."
+  [dep]
+  (or (= (dep :optional) "true")
+      (not= (dep :type "jar") "jar")
+      (contains? #{"test" "system"}
+                 (dep :scope "compile"))))
+
 (defn- parse-dep
   "Turn Maven dependency XML into a [package version] vector."
   [dep]
-  (let [tag #(first (xml-> dep % text))]
-    (list
-      [(str (tag :groupId) "/" (tag :artifactId))
-       (tag :version)])))
+  (let [dep (tag-map dep)]
+    (if-not (ignore-dep? dep)
+      [[(str (dep :groupId) "/" (dep :artifactId))
+        (dep :version)]])))
 
 (defn- read-deps
   "Read the dependencies from the Maven POM XML."
