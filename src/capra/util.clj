@@ -1,10 +1,17 @@
 (ns capra.util
   "Utility functions for Capra."
+  (:use clojure.contrib.duck-streams)
   (:use clojure.contrib.java-utils)
   (:use clojure.contrib.zip-filter.xml)
   (:require [clojure.xml :as xml])
   (:require [clojure.zip :as zip])
   (:require [clojure.contrib.zip-filter :as zf]))
+
+(defn copy-url
+  "Copy the contents of a URL to a filepath."
+  [url filepath]
+  (copy (.openStream (as-url url))
+        filepath))
 
 (defn- tag-and-text
   "Return a vector containing the tag name and text of a node."

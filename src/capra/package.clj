@@ -2,8 +2,8 @@
   "An extensible package manager for Clojure."
   (:refer-clojure :exclude [list get find])
   (:use capra.adapter)
+  (:use capra.util)
   (:use clojure.contrib.def)
-  (:use clojure.contrib.duck-streams)
   (:use clojure.contrib.java-utils))
 
 ;; Environment
@@ -73,12 +73,6 @@
   [file-info]
   (file *package-dir*
         (str (file-info :sha1) ".jar")))
-
-(defn- copy-url
-  "Copy the contents of a URL to a filepath."
-  [url filepath]
-  (copy (.openStream (as-url url))
-        filepath))
 
 (defn download
   "Download the jar from a single package jar. Returns the new package
