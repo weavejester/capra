@@ -4,20 +4,26 @@
   (:use capra.adapter)
   (:use capra.util)
   (:use clojure.contrib.def)
+  (:use clojure.contrib.duck-streams)
   (:use clojure.contrib.java-utils))
 
 ;; Environment
 
-(defvar *home-dir*
+(defvar *root-dir*
   (or (System/getenv "CAPRA_HOME")
-      (System/getenv "HOME")))
-
-(defvar *package-dir*
-  (file *home-dir* ".capra" "packages"))
+      (file (System/getenv "HOME") ".capra")))
 
 ;; Sources
 
-(defvar sources (atom [])
+(defn- read-sources
+  "Read the list of sources from a file on disk."
+  [filename]
+  (let [filepath (file *root-dir* filename)]
+    (if (.exists filepath)
+      (read-lines filepath))))
+
+(defvar sources
+  (atom (vec (read-sources "sources.list")))
   "Atom containing a vector of repository URLs.")
 
 (defn add-source
@@ -48,11 +54,15 @@
 
 ;; Packages
 
+(defvar loaded (atom {})
+  "A list of packages currently loaded into the classpath. This is always
+  a subset of the package cache.")
+
 (defvar cache (atom {})
-  "A map of cached packages currently in the classpath.")
+  "A map of all cached packages.")
 
 (defn cached?
-  "Is a package already is the cache?"
+  "Is a package already loaded?"
   [name version]
   (contains? @cache [name version]))
 
@@ -71,7 +81,8 @@
 (defn- download-path
   "Return the download path for a file."
   [file-info]
-  (file *package-dir*
+  (file *root-dir*
+        "cache"
         (str (file-info :sha1) ".jar")))
 
 (defn download
