@@ -7,6 +7,13 @@
   (:require [clojure.zip :as zip])
   (:require [clojure.contrib.zip-filter :as zf]))
 
+(defn read-file
+  "Read the contents of a Clojure data structure from a file. Returns nil if
+  the file does not exist."
+  [filepath]
+  (if (.exists (file filepath))
+    (read-string (slurp* filepath))))
+
 (defn copy-url
   "Copy the contents of a URL to a filepath."
   [url filepath]

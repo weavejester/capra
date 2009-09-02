@@ -1,6 +1,6 @@
 (ns capra.package
   "An extensible package manager for Clojure."
-  (:refer-clojure :exclude [list get find])
+  (:refer-clojure :exclude [list load])
   (:use capra.adapter)
   (:use capra.util)
   (:use clojure.contrib.def)
@@ -47,36 +47,26 @@
     (let [[type url] (split-source source)]
       (apply func type url args))))
 
-(defn- first-not-nil
-  "Return the first value that is not nil."
-  [coll]
-  (first (remove nil? coll)))
-
 ;; Packages
 
-(defvar loaded (atom {})
-  "A list of packages currently loaded into the classpath. This is always
-  a subset of the package cache.")
+(defn query
+  "Get a specific package by name and version."
+  [name version]
+  (first
+    (remove nil?
+      (map (src-> get-package name version) @sources))))
 
-(defvar cache (atom {})
+(defvar- cache-index
+  (file *root-dir* "cache.index"))
+
+(defvar cache
+  (atom (or (read-file cache-index) {}))
   "A map of all cached packages.")
 
 (defn cached?
-  "Is a package already loaded?"
+  "Is a package cached?"
   [name version]
   (contains? @cache [name version]))
-
-(defn- add-to-cache!
-  "Add a package to the package cache."
-  [package]
-  (let [key [(package :name) (package :version)]]
-    (swap! cache assoc key package)))
-
-(defn get
-  "Get a specific package by name and version."
-  [name version]
-  (first-not-nil
-    (map (src-> get-package name version) @sources)))
 
 (defn- download-path
   "Return the download path for a file."
@@ -85,26 +75,36 @@
         "cache"
         (str (file-info :sha1) ".jar")))
 
-(defn download
-  "Download the jar from a single package jar. Returns the new package
-  filepath."
+(defn fetch
+  "Downloads and caches the content of a package."
   [package]
-  (doall
-    (for [file-info (package :files)]
-      (let [filepath (download-path file-info)]
-        (when-not (.exists filepath)
-          (copy-url (file-info :url) filepath))
-        filepath))))
+  (doseq [file-info (package :files)]
+    (let [filepath (download-path file-info)]
+      (when-not (.exists filepath)
+        (copy-url (file-info :url) filepath))))
+  (let [key [(package :name) (package :version)]]
+    (swap! cache assoc key package)))
+
+(defvar loaded (atom #{})
+  "A set of packages currently loaded into the classpath. This is always
+  a subset of the package cache.")
+
+(defn load
+  "Load a cached package into the classpath."
+  [package]
+  (when-not (@loaded package)
+    (swap! loaded conj package)
+    (doseq [file-info (package :files)]
+      (add-classpath (.toURL (download-path file-info))))))
 
 (defn install
   "Downloads the package and all dependencies, then adds them to the
   classpath."
   [name version]
-  (when-not (cached? name version)
-    (println "Installing" name version)
-    (let [package (get name version)]
-      (add-to-cache! package)
-      (doseq [dependency (package :dependencies)]
-        (apply install dependency))
-      (doseq [filepath (download package)]
-        (add-classpath (.toURL filepath))))))
+  (println "Installing" name version)
+  (let [package (or (@cache [name version])
+                    (query name version))]
+    (doseq [dependency (package :dependencies)]
+      (apply install dependency))
+    (fetch package)
+    (load package)))
