@@ -9,24 +9,11 @@
 
 (defn- url-prefix
   "Given a four-part Maven ID, return the common URL prefix."
-  [[source group artifact version]]
+  [source group artifact version]
   (str source "/" group "/" artifact "/" version "/"
        artifact "-" version))
 
-(defn- split-name
-  "Split package name into a group and artifact ID."
-  [name]
-  (if-let [groups (re-matches #"(.+)/(.+)" name)]
-    (rest groups)
-    [name name]))
-
-(defn- get-maven-id
-  "Get the full Maven ID from the source, name and version of a package."
-  [source name version]
-  (let [[group artifact] (split-name name)]
-    [source group artifact version]))
-
-(defn- get-file-sha1
+(defn- fetch-sha1
   "Retrieve the SHA1 of a file referenced by a URL."
   [url]
   (let [content (slurp* (str url ".sha1"))]
@@ -34,9 +21,8 @@
 
 (defn- fetch-pom
   "Get the Maven POM file of the package."
-  [maven-id]
-  (let [url (str (url-prefix maven-id) ".pom")]
-    (xml/parse url)))
+  [url]
+  (xml-zip (xml/parse (str url ".pom"))))
 
 (defn- ignore-dep?
   "True if dependency can be ignored."
@@ -51,7 +37,8 @@
   [dep]
   (let [dep (tag-map dep)]
     (if-not (ignore-dep? dep)
-      [[(str (dep :groupId) "/" (dep :artifactId))
+      [[(dep :groupId)
+        (dep :artifactId)
         (dep :version)]])))
 
 (defn- read-deps
@@ -62,14 +49,15 @@
     :dependency
     parse-dep))
 
-(defmethod get-package :mvn
-  [_ source name version]
-  (let [maven-id (get-maven-id source name version)
-        pom-xml  (xml-zip (fetch-pom maven-id))
-        file-url (str (url-prefix maven-id) ".jar")]
-    {:name    name
+(defmethod query-package :mvn
+  [_ source group name version]
+  (let [url      (url-prefix source group name version)
+        pom-xml  (fetch-pom url)
+        file-url (str url ".jar")]
+    {:group   group
+     :name    name
      :version version
      :description (xml1-> pom-xml :description text)
      :files [{:url  file-url
-              :sha1 (get-file-sha1 file-url)}]
+              :sha1 (fetch-sha1 file-url)}]
      :dependencies (read-deps pom-xml)}))

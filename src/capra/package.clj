@@ -50,11 +50,12 @@
 ;; Packages
 
 (defn query
-  "Get a specific package by name and version."
-  [name version]
+  "Get a specific package by group, name and version."
+  [group name version]
   (first
     (remove nil?
-      (map (src-> get-package name version) @sources))))
+      (map (src-> query-package group name version)
+           @sources))))
 
 (defvar- cache-index
   (file *root-dir* "cache.index"))
@@ -65,8 +66,8 @@
 
 (defn cached?
   "Is a package cached?"
-  [name version]
-  (contains? @cache [name version]))
+  [group name version]
+  (contains? @cache [group name version]))
 
 (defn- download-path
   "Return the download path for a file."
@@ -82,7 +83,9 @@
     (let [filepath (download-path file-info)]
       (when-not (.exists filepath)
         (copy-url (file-info :url) filepath))))
-  (let [key [(package :name) (package :version)]]
+  (let [key [(package :group)
+             (package :name)
+             (package :version)]]
     (swap! cache assoc key package)))
 
 (defvar loaded (atom #{})
@@ -100,10 +103,10 @@
 (defn install
   "Downloads the package and all dependencies, then adds them to the
   classpath."
-  [name version]
+  [group name version]
   (println "Installing" name version)
-  (let [package (or (@cache [name version])
-                    (query name version))]
+  (let [package (or (@cache [group name version])
+                    (query group name version))]
     (doseq [dependency (package :dependencies)]
       (apply install dependency))
     (fetch package)
