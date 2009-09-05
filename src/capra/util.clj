@@ -14,6 +14,11 @@
   (if (.exists (file filepath))
     (read-string (slurp* filepath))))
 
+(defn write-file
+  "Write the contents of a Clojure data structure to a file."
+  [filepath data]
+  (spit filepath (prn-str data)))
+
 (defn copy-url
   "Copy the contents of a URL to a filepath."
   [url filepath]

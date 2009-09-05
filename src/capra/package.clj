@@ -86,7 +86,8 @@
   (let [key [(package :group)
              (package :name)
              (package :version)]]
-    (swap! cache assoc key package)))
+    (swap! cache assoc key package)
+    (write-file cache-index @cache)))
 
 (defvar loaded (atom #{})
   "A set of packages currently loaded into the classpath. This is always
