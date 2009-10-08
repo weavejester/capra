@@ -31,22 +31,6 @@
   [source]
   (swap! sources conj source))
 
-(defvar- source-regex #"^([a-z0-9.-]+)\+(.*)$"
-  "Regular expression to split source type from source URL.")
-
-(defn- split-source
-  "Split the source type from a source URL."
-  [source]
-  (let [[_ type url] (re-matches source-regex source)]
-    [(keyword type) url]))
-
-(defn- src->
-  "Turn a capra.interface function into one that takes a single source URL."
-  [func & args]
-  (fn [source]
-    (let [[type url] (split-source source)]
-      (apply func type url args))))
-
 ;; Packages
 
 (defn query
