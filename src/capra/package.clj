@@ -1,38 +1,16 @@
 (ns capra.package
-  "An extensible package manager for Clojure."
-  (:refer-clojure :exclude [list load])
-  (:use capra.adapter)
-  (:use capra.util)
-  (:use clojure.contrib.def)
-  (:use clojure.contrib.duck-streams)
-  (:use clojure.contrib.java-utils))
+  "Retrieve and manage packages on a Capra server."
+  (:refer-clojure :exclude [get])
+  (:use capra.http))
 
-;; Environment
+(defn get
+  "Get a package by account, name and version."
+  [account name version]
+  (let [package (http-get "/" account "/" name "/" version)]
+    (dissoc package :type)))
 
-(defvar *root-dir*
-  (or (System/getenv "CAPRA_HOME")
-      (file (System/getenv "HOME") ".capra")))
 
-;; Sources
-
-(defn- read-sources
-  "Read the list of sources from a file on disk."
-  [filename]
-  (let [filepath (file *root-dir* filename)]
-    (if (.exists filepath)
-      (read-lines filepath))))
-
-(defvar sources
-  (atom (vec (read-sources "sources.list")))
-  "Atom containing a vector of repository URLs.")
-
-(defn add-source
-  "Add a source URL to the end of capra.package/sources."
-  [source]
-  (swap! sources conj source))
-
-;; Packages
-
+(comment
 (defn query
   "Get a specific package by group, name and version."
   [group name version]
@@ -96,3 +74,5 @@
       (apply install dependency))
     (fetch package)
     (load package)))
+
+  )

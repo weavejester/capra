@@ -3,16 +3,25 @@
   (:refer-clojure :exclude [get list])
   (:use capra.http))
 
-(def url "http://localhost:8080")
+(defn- assoc-package
+  "Assoc a package with an index map."
+  [index package]
+  (let [package (dissoc package :account :href)]
+    (assoc index (package :name) package)))
+
+(defn- format-packages
+  [packages]
+  (reduce assoc-package {} packages))
 
 (defn list
   "List all Capra accounts on server."
   []
-  (let [accounts (http-request {:method "GET", :url url})]
-    (set (map :name accounts))))
+  (set (map :name (http-get "/"))))
 
 (defn get
   "Get a Capra account by name."
   [name]
-  (let )
-  (http-request {:method "GET", :url (str url "/" name)}))
+  (let [account (http-get "/" name)]
+    (-> account
+      (dissoc :type)
+      (update-in [:packages] format-packages))))
