@@ -23,13 +23,11 @@
   [account name version]
   (contains? @cache [account name version]))
 
-(comment
 (defn- download-path
   "Return the download path for a file."
   [file-info]
-  (file *capra-home*
-        "cache"
-        (str (file-info :sha1) ".jar")))
+  (File. (File. *capra-home* "cache")
+         (str (file-info :sha1) ".jar")))
 
 (defn fetch
   "Downloads and caches the content of a package."
@@ -37,13 +35,14 @@
   (doseq [file-info (package :files)]
     (let [filepath (download-path file-info)]
       (when-not (.exists filepath)
-        (copy-url (file-info :url) filepath))))
-  (let [key [(package :group)
+        (http-copy (file-info :href) filepath))))
+  (let [key [(package :account)
              (package :name)
              (package :version)]]
     (swap! cache assoc key package)
     (write-file cache-index @cache)))
 
+(comment
 (defvar loaded (atom #{})
   "A set of packages currently loaded into the classpath. This is always
   a subset of the package cache.")

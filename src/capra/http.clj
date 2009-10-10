@@ -3,6 +3,7 @@
   (:use capra.system)
   (:use capra.util)
   (:import java.io.IOException)
+  (:import java.io.FileOutputStream)
   (:import java.io.OutputStream)
   (:import java.io.OutputStreamWriter)
   (:import java.net.URL)
@@ -12,6 +13,14 @@
   "Send a HTTP GET request to a Clojure web-service."
   [& uri-parts]
   (read-stream (.openStream (URL. (apply str *source* uri-parts)))))
+
+(defn http-copy
+  "Download a URL to a location on disk."
+  [src-url dest-path]
+  (copy-stream
+    (.openStream (URL. src-url))
+    (FileOutputStream. dest-path)))
+
 
 (defn write-stream
   "Write a Clojure data structure to an output stream."
