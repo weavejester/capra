@@ -1,20 +1,12 @@
 (ns capra.http
   "Library for talking to Clojure web services, like capra-server."
-  (:use capra.globals)
+  (:use capra.system)
+  (:use capra.util)
   (:import java.io.IOException)
-  (:import java.io.InputStream)
   (:import java.io.OutputStream)
-  (:import java.io.InputStreamReader)
   (:import java.io.OutputStreamWriter)
-  (:import java.io.PushbackReader)
   (:import java.net.URL)
   (:import java.net.HttpURLConnection))
-
-(defn read-stream
-  "Read a Clojure data structure from an input stream."
-  [#^InputStream stream]
-  (with-open [reader (InputStreamReader. stream)]
-    (read (PushbackReader. reader))))
 
 (defn http-get
   "Send a HTTP GET request to a Clojure web-service."

@@ -1,7 +1,10 @@
 (ns capra.package
   "Retrieve and manage packages on a Capra server."
   (:refer-clojure :exclude [get])
-  (:use capra.http))
+  (:use capra.http)
+  (:use capra.util)
+  (:use capra.system)
+  (:import java.io.File))
 
 (defn get
   "Get a package by account, name and version."
@@ -9,32 +12,22 @@
   (let [package (http-get "/" account "/" name "/" version)]
     (dissoc package :type)))
 
+(def cache-index
+  (File. *capra-home* "cache.index"))
 
-(comment
-(defn query
-  "Get a specific package by group, name and version."
-  [group name version]
-  (first
-    (remove nil?
-      (map (src-> query-package group name version)
-           @sources))))
-
-(defvar- cache-index
-  (file *root-dir* "cache.index"))
-
-(defvar cache
-  (atom (or (read-file cache-index) {}))
-  "A map of all cached packages.")
+(def cache
+  (atom (or (read-file cache-index) {})))
 
 (defn cached?
   "Is a package cached?"
-  [group name version]
-  (contains? @cache [group name version]))
+  [account name version]
+  (contains? @cache [account name version]))
 
+(comment
 (defn- download-path
   "Return the download path for a file."
   [file-info]
-  (file *root-dir*
+  (file *capra-home*
         "cache"
         (str (file-info :sha1) ".jar")))
 
@@ -74,5 +67,4 @@
       (apply install dependency))
     (fetch package)
     (load package)))
-
-  )
+)
