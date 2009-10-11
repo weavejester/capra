@@ -1,35 +1,35 @@
 (ns capra.package
   "Retrieve and manage packages on a Capra server."
-  (:refer-clojure :exclude [get])
+  (:refer-clojure :exclude [get load])
   (:use capra.http)
   (:use capra.util)
   (:use capra.system)
   (:import java.io.File))
 
 (defn get
-  "Get a package by account, name and version."
+  "Retrieve package metadata by account, name and version."
   [account name version]
   (let [package (http-get "/" account "/" name "/" version)]
     (dissoc package :type)))
 
-(def cache-index
+(def index-file
   (File. *capra-home* "cache.index"))
 
 (def cache
-  (atom (or (read-file cache-index) {})))
+  (atom (or (read-file index-file) {})))
 
 (defn cached?
   "Is a package cached?"
   [account name version]
   (contains? @cache [account name version]))
 
-(defn- download-path
+(defn- cache-path
   "Return the download path for a file."
   [file-info]
   (File. (File. *capra-home* "cache")
          (str (file-info :sha1) ".jar")))
 
-(defn fetch
+(defn cache!
   "Downloads and caches the content of a package."
   [package]
   (doseq [file-info (package :files)]
@@ -40,12 +40,9 @@
              (package :name)
              (package :version)]]
     (swap! cache assoc key package)
-    (write-file cache-index @cache)))
+    (write-file index-file @cache)))
 
-(comment
-(defvar loaded (atom #{})
-  "A set of packages currently loaded into the classpath. This is always
-  a subset of the package cache.")
+(def loaded (atom #{}))
 
 (defn load
   "Load a cached package into the classpath."
@@ -58,12 +55,10 @@
 (defn install
   "Downloads the package and all dependencies, then adds them to the
   classpath."
-  [group name version]
-  (println "Installing" name version)
-  (let [package (or (@cache [group name version])
-                    (query group name version))]
-    (doseq [dependency (package :dependencies)]
+  [account name version]
+  (let [package (or (cached? account name version)
+                    (get account name version))]
+    (doseq [dependency (package :depends)]
       (apply install dependency))
     (fetch package)
     (load package)))
-)
