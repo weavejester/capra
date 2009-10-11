@@ -33,7 +33,7 @@
   "Downloads and caches the content of a package."
   [package]
   (doseq [file-info (package :files)]
-    (let [filepath (download-path file-info)]
+    (let [filepath (cache-path file-info)]
       (when-not (.exists filepath)
         (http-copy (file-info :href) filepath))))
   (let [key [(package :account)
@@ -50,15 +50,15 @@
   (when-not (@loaded package)
     (swap! loaded conj package)
     (doseq [file-info (package :files)]
-      (add-classpath (.toURL (download-path file-info))))))
+      (add-classpath (.toURL (cache-path file-info))))))
 
 (defn install
   "Downloads the package and all dependencies, then adds them to the
   classpath."
   [account name version]
-  (let [package (or (cached? account name version)
+  (let [package (or (@cache [account name version])
                     (get account name version))]
     (doseq [dependency (package :depends)]
       (apply install dependency))
-    (fetch package)
+    (cache! package)
     (load package)))

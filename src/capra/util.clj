@@ -4,8 +4,8 @@
   (:import java.io.InputStream)
   (:import java.io.OutputStream)
   (:import java.io.FileInputStream)
+  (:import java.io.FileOutputStream)
   (:import java.io.InputStreamReader)
-  (:import java.io.FileWriter)
   (:import java.io.PushbackReader))
 
 (defn read-stream
@@ -20,12 +20,17 @@
   (if (.exists file)
     (read-stream (FileInputStream. file))))
 
+(defn write-stream
+  "Write a Clojure data structure to an output stream."
+  [#^OutputStream stream, data]
+  (with-open [writer (OutputStreamWriter. stream)]
+    (binding [*out* writer]
+      (pr data))))
+
 (defn write-file
   "Write a Clojure data structure to a file."
   [file data]
-  (with-open [writer (FileWriter. file)]
-    (binding [*out* writer]
-      (pr data))))
+  (write-stream (FileOutputStream. file)))
 
 (defn copy-stream
   "Copy the contents of an InputStream into an OutputStream."

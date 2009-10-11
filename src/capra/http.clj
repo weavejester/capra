@@ -11,7 +11,7 @@
 
 (defn http-get
   "Send a HTTP GET request to a Clojure web-service."
-  [& uri-parts]
+  [url]
   (read-stream (.openStream (URL. (apply str *source* uri-parts)))))
 
 (defn http-copy
@@ -20,14 +20,6 @@
   (copy-stream
     (.openStream (URL. src-url))
     (FileOutputStream. dest-path)))
-
-
-(defn write-stream
-  "Write a Clojure data structure to an output stream."
-  [#^OutputStream stream, data]
-  (with-open [writer (OutputStreamWriter. stream)]
-    (binding [*out* writer]
-      (pr data))))
 
 (defn http-request
   "Send a HTTP request to a Clojure web-service."
