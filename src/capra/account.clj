@@ -1,7 +1,8 @@
 (ns capra.account
   "Access and manage accounts on a Capra server."
   (:refer-clojure :exclude [get list])
-  (:use capra.http))
+  (:use capra.http)
+  (:use capra.system))
 
 (defn- assoc-package
   "Assoc a package with an index map."
@@ -16,12 +17,12 @@
 (defn list
   "List all Capra accounts on server."
   []
-  (set (map :name (http-get "/"))))
+  (set (map :name (http-get (str *source* "/")))))
 
 (defn get
   "Get a Capra account by name."
   [name]
-  (let [account (http-get "/" name)]
+  (let [account (http-get (str *source* "/" name))]
     (-> account
       (dissoc :type)
       (update-in [:packages] format-packages))))

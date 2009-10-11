@@ -9,7 +9,7 @@
 (defn get
   "Retrieve package metadata by account, name and version."
   [account name version]
-  (let [package (http-get "/" account "/" name "/" version)]
+  (let [package (http-get (str *source* "/" account "/" name "/" version))]
     (dissoc package :type)))
 
 (def index-file

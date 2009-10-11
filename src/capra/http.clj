@@ -12,7 +12,7 @@
 (defn http-get
   "Send a HTTP GET request to a Clojure web-service."
   [url]
-  (read-stream (.openStream (URL. (apply str *source* uri-parts)))))
+  (read-stream (.openStream (URL. url))))
 
 (defn http-copy
   "Download a URL to a location on disk."
