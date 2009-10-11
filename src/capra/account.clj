@@ -17,12 +17,17 @@
 (defn list
   "List all Capra accounts on server."
   []
-  (set (map :name (http-get (str *source* "/")))))
+  (set (map :name (http-get *source*))))
 
 (defn get
   "Get a Capra account by name."
   [name]
-  (let [account (http-get (str *source* "/" name))]
+  (if-let [account (http-get (str *source* "/" name))]
     (-> account
       (dissoc :type)
       (update-in [:packages] format-packages))))
+
+(defn create
+  "Update a Capra account."
+  [account]
+  (http-post *source* account))

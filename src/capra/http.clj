@@ -10,7 +10,7 @@
   (:import java.net.HttpURLConnection))
 
 (defn http-get
-  "Send a HTTP GET request to a Clojure web-service."
+  "Send a HTTP GET request to a Clojure web service."
   [url]
   (read-stream (.openStream (URL. url))))
 
@@ -21,20 +21,18 @@
     (.openStream (URL. src-url))
     (FileOutputStream. dest-path)))
 
-(defn http-request
-  "Send a HTTP request to a Clojure web-service."
-  [request]
-  (let [body (request :body)
-        conn (.openConnection (URL. (request :url)))]
-    (.setRequestMethod conn (request :method))
-    (when body
-      (.setDoOutput conn true)
-      (.setRequestProperty conn "Content-Type" "application/clojure"))
+(defn http-post
+  "Send a HTTP POST request to a Clojure web service"
+  [url data]
+  (let [conn (.openConnection (URL. url))]
+    (doto conn
+      (.setRequestMethod "POST")
+      (.setDoOutput true)
+      (.setRequestProperty "Content-Type" "application/clojure"))
     (try
       (.connect conn)
-      (when body
-        (write-stream (.getOutputStream conn) body))
-      (read-stream (.getInputStream conn))
+      (write-stream (.getOutputStream conn) data)
+      (.close (.getInputStream conn))
       (catch IOException e
         (read-stream (.getErrorStream conn)))
       (finally
