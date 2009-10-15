@@ -8,7 +8,13 @@
   (:import java.io.FileOutputStream)
   (:import java.io.InputStreamReader)
   (:import java.io.OutputStreamWriter)
-  (:import java.io.PushbackReader))
+  (:import java.io.PushbackReader)
+  (:import java.security.SecureRandom))
+
+(defn byte-array
+  "Create an array of bytes"
+  [size]
+  (make-array Byte/TYPE size))
 
 (defn read-stream
   "Read a Clojure data structure from an input stream."
@@ -32,18 +38,25 @@
 (defn write-file
   "Write a Clojure data structure to a file."
   [file data]
-  (write-stream (FileOutputStream. file)))
+  (write-stream (FileOutputStream. file) data))
 
 (defn copy-stream
   "Copy the contents of an InputStream into an OutputStream."
   ([in out]
     (copy-stream in out 4096))
   ([#^InputStream in, #^OutputStream out, buffer-size]
-    (let [buffer (make-array Byte/TYPE buffer-size)]
+    (let [buffer (byte-array buffer-size)]
       (loop [len (.read in buffer)]
         (when (pos? len)
           (.write out buffer 0 len)
           (recur (.read in buffer)))))))
+
+(defn random-bytes
+  "Returns a random byte array of the specified size."
+  [size]
+  (let [seed (byte-array size)]
+    (.nextBytes (SecureRandom/getInstance "SHA1PRNG") seed)
+    seed))
 
 (defmacro #^{:private true} ->>
   "Backported from Clojure HEAD."
