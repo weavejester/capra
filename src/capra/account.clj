@@ -45,13 +45,13 @@
 (defn create
   "Create a new Capra account from a map of values."
   [account]
-  (http-post *source* account))
+  (-> (http-connect "POST" *source*)
+      (http-send account)))
 
 (defn register
-  "Register a new Capra account with a random passkey. Saves the account
-  name and passkey."
+  "Register a new Capra account with a random passkey. The passkey is saved to
+  account-keys, and automatically used when updating or creating private data."
   [name]
   (let [passkey (base64-encode (random-bytes 24))]
     (create {:name name, :passkey passkey})
-    (save-key! name passkey)
-    passkey))
+    (save-key! name passkey)))
