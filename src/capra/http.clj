@@ -21,8 +21,9 @@
 (defn basic-auth
   "Setup basic auth on a HTTP connection."
   [conn username password]
-  (let [auth (base64-encode (str username ":" password))]
-    (.setRequestProperty conn "Authorization" (str "Basic " auth))))
+  (let [id   (str username ":" password)
+        auth (str "Basic " (base64-encode (.getBytes id)))]
+    (.setRequestProperty conn "Authorization" auth)))
 
 (defn http-send
   "Send data via a HTTP request to a Clojure web service"
@@ -32,7 +33,7 @@
     (write-stream (.getOutputStream conn) data)
     (.close (.getInputStream conn))
     (catch IOException e
-      (read-stream (.getErrorStream conn)))
+      (throwf (read-stream (.getErrorStream conn))))
     (finally
       (.disconnect conn))))
 

@@ -11,6 +11,11 @@
   (:import java.io.PushbackReader)
   (:import java.security.SecureRandom))
 
+(defn throwf
+  "Throw an Exception object with a message."
+  [message]
+  (throw (Exception. message)))
+
 (defn byte-array
   "Create an array of bytes"
   [size]
