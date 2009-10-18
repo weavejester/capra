@@ -4,6 +4,7 @@
   (:use capra.http)
   (:use capra.util)
   (:use capra.system)
+  (:use [capra.account :only (account-keys)])
   (:import java.io.File))
 
 (defn get
@@ -11,6 +12,18 @@
   [account name version]
   (let [package (http-get (str *source* "/" account "/" name "/" version))]
     (dissoc package :type)))
+
+(defn create
+  "Upload a new package with files."
+  [package]
+  (let [files   (package :files)
+        package (dissoc package :files)
+        account (package :account)]
+    (if-let [passkey (@account-keys account)]
+      (doto (http-connect "POST" (str *source* "/" account))
+            (basic-auth account passkey)
+            (http-send package))
+      (throwf "No registered passkey for account name."))))
 
 (def index-file
   (File. *capra-home* "cache.index"))
