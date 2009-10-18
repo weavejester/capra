@@ -25,17 +25,29 @@
         auth (str "Basic " (base64-encode (.getBytes id)))]
     (.setRequestProperty conn "Authorization" auth)))
 
-(defn http-send
-  "Send data via a HTTP request to a Clojure web service"
-  [conn data]
+(defn- with-connection
+  "Interact with a HTTP server."
+  [conn callback]
   (try
     (.connect conn)
-    (write-stream (.getOutputStream conn) data)
+    (callback)
     (.close (.getInputStream conn))
     (catch IOException e
       (throwf (read-stream (.getErrorStream conn))))
     (finally
       (.disconnect conn))))
+
+(defn http-stream
+  "Send a stream of data via a HTTP request to a server."
+  [conn stream]
+  (with-connection conn
+    #(copy-stream stream (.getOutputStream conn))))
+
+(defn http-send
+  "Send data via a HTTP request to a Clojure web service"
+  [conn data]
+  (with-connection conn
+    #(write-stream (.getOutputStream conn) data)))
 
 (defn http-get
   "Send a HTTP GET request to a URL."
