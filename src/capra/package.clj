@@ -1,7 +1,7 @@
 (ns capra.package
   "Retrieve and manage packages on a Capra server."
   (:refer-clojure :exclude [get load])
-  (:use [capra.account :only (account-keys)])
+  (:require capra.account)
   (:use capra.http-client)
   (:use capra.system)
   (:use capra.util)
@@ -17,28 +17,26 @@
 (defn upload-file
   "Upload a file to an existing package."
   [account package version filepath]
-  (let [url (str *source* "/" account "/" package "/" version)]
-    (if-let [passkey (@account-keys account)]
-      (doto (http-connect "POST" url)
-            (basic-auth account passkey)
-            (content-type "application/java-archive")
-            (http-stream (FileInputStream. filepath)))
-      (throwf "No registered passkey for account."))))
+  (let [url  (str *source* "/" account "/" package "/" version)
+        pass (capra.account/get-key account)]
+    (doto (http-connect "POST" url)
+          (basic-auth account pass)
+          (content-type "application/java-archive")
+          (http-stream (FileInputStream. filepath)))))
 
 (defn create
   "Upload a new package with files."
   [package]
-  (let [account (package :account)]
-    (if-let [passkey (@account-keys account)]
-      (do (doto (http-connect "POST" (str *source* "/" account))
-                (basic-auth account passkey)
-                (http-send (dissoc package :files)))
-          (doseq [file (package :files)]
-            (upload-file account
-                         (package :name)
-                         (package :version)
-                         file)))
-      (throwf "No registered passkey for account."))))
+  (let [account (package :account)
+        passkey (capra.account/get-key account)]
+    (do (doto (http-connect "POST" (str *source* "/" account))
+              (basic-auth account passkey)
+              (http-send (dissoc package :files)))
+        (doseq [file (package :files)]
+          (upload-file account
+                       (package :name)
+                       (package :version)
+                       file)))))
 
 (def index-file
   (File. *capra-home* "cache.index"))

@@ -12,10 +12,16 @@
 (def account-keys
   (atom (or (read-file key-file) {})))
 
+(defn get-key
+  "Get the key for an account or throw an exception if none exist."
+  [account-name]
+  (or (@account-keys account-name)
+      (throwf "No registered passkey for account.")))
+
 (defn save-key!
   "Add a new account name and key to account-keys."
-  [account passkey]
-  (swap! account-keys assoc account passkey)
+  [account-name passkey]
+  (swap! account-keys assoc account-name passkey)
   (write-file key-file @account-keys))
 
 (defn- assoc-package
@@ -60,8 +66,6 @@
   "Update an existing Capra account."
   [account]
   (let [name (account :name)]
-    (if-let [pass (@account-keys name)]
-      (doto (http-connect "PUT" (str *source* "/" name))
-            (basic-auth name pass)
-            (http-send account))
-      (throwf "No registered passkey for account name."))))
+    (doto (http-connect "PUT" (str *source* "/" name))
+          (basic-auth name (get-key name))
+          (http-send account))))
