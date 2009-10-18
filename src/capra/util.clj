@@ -16,6 +16,12 @@
   [message]
   (throw (Exception. message)))
 
+(defmacro with-ns
+  "Evaluates body in another namespace. Taken from clojure.contrib/with-ns."
+  [ns & body]
+  `(binding [*ns* (the-ns ~ns)]
+     ~@(map (fn [form] `(eval '~form)) body)))
+
 (defn byte-array
   "Create an array of bytes"
   [size]
