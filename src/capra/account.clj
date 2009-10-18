@@ -1,7 +1,7 @@
 (ns capra.account
   "Access and manage accounts on a Capra server."
   (:refer-clojure :exclude [get list])
-  (:use capra.http)
+  (:use capra.http-client)
   (:use capra.system)
   (:use capra.util)
   (:import java.io.File))

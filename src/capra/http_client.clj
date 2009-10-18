@@ -1,4 +1,4 @@
-(ns capra.http
+(ns capra.http-client
   "Library for talking to Clojure web services, like capra-server."
   (:use capra.system)
   (:use capra.util)

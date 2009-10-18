@@ -1,10 +1,10 @@
 (ns capra.package
   "Retrieve and manage packages on a Capra server."
   (:refer-clojure :exclude [get load])
-  (:use capra.http)
-  (:use capra.util)
-  (:use capra.system)
   (:use [capra.account :only (account-keys)])
+  (:use capra.http-client)
+  (:use capra.system)
+  (:use capra.util)
   (:import java.io.File))
 
 (defn get
