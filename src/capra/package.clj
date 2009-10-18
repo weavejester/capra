@@ -5,7 +5,8 @@
   (:use capra.http-client)
   (:use capra.system)
   (:use capra.util)
-  (:import java.io.File))
+  (:import java.io.File)
+  (:import java.io.FileInputStream))
 
 (defn get
   "Retrieve package metadata by account, name and version."
@@ -13,17 +14,31 @@
   (let [package (http-get (str *source* "/" account "/" name "/" version))]
     (dissoc package :type)))
 
+(defn upload-file
+  "Upload a file to an existing package."
+  [account package version filepath]
+  (let [url (str *source* "/" account "/" package "/" version)]
+    (if-let [passkey (@account-keys account)]
+      (doto (http-connect "POST" url)
+            (basic-auth account passkey)
+            (content-type "application/java-archive")
+            (http-stream (FileInputStream. filepath)))
+      (throwf "No registered passkey for account."))))
+
 (defn create
   "Upload a new package with files."
   [package]
-  (let [files   (package :files)
-        package (dissoc package :files)
-        account (package :account)]
+  (let [account (package :account)]
     (if-let [passkey (@account-keys account)]
-      (doto (http-connect "POST" (str *source* "/" account))
-            (basic-auth account passkey)
-            (http-send package))
-      (throwf "No registered passkey for account name."))))
+      (do (doto (http-connect "POST" (str *source* "/" account))
+                (basic-auth account passkey)
+                (http-send (dissoc package :files)))
+          (doseq [file (package :files)]
+            (upload-file account
+                         (package :name)
+                         (package :version)
+                         file)))
+      (throwf "No registered passkey for account."))))
 
 (def index-file
   (File. *capra-home* "cache.index"))

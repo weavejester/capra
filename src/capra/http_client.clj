@@ -9,14 +9,19 @@
   (:import java.net.URL)
   (:import java.net.HttpURLConnection))
 
+(defn content-type
+  "Set the content type of the HTTP connection."
+  [conn mime-type]
+  (.setRequestProperty conn "Content-Type" mime-type))
+
 (defn http-connect
-  "Create a new HTTP connection"
+  "Create a new HTTP connection."
   [method url]
   (let [conn (.openConnection (URL. url))]
     (doto conn
       (.setRequestMethod method)
       (.setDoOutput true)
-      (.setRequestProperty "Content-Type" "application/clojure"))))
+      (content-type "application/clojure"))))
 
 (defn basic-auth
   "Setup basic auth on a HTTP connection."
