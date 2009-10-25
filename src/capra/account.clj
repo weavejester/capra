@@ -57,9 +57,9 @@
 (defn register
   "Register a new Capra account with a random passkey. The passkey is saved to
   account-keys, and automatically used when updating or creating private data."
-  [name]
+  [name email]
   (let [passkey (base64-encode (random-bytes 24))]
-    (create {:name name, :passkey passkey})
+    (create {:name name, :passkey passkey, :email email})
     (save-key! name passkey)))
 
 (defn put
