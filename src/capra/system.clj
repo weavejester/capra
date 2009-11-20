@@ -1,12 +1,14 @@
 (ns capra.system
   (:import java.io.File))
 
-(def *source*
-  "http://localhost:8080")
+(def *source* "http://capra-packages.net")
 
 (def *home*
   (or (System/getenv "HOME")
-      (System/getenv "HOMEPATH")))
+      (str (System/getenv "HOMEDRIVE")
+           (System/getenv "HOMEPATH"))))
 
-(def *capra-home* 
-  (File. *home* ".capra"))
+(def *capra-home*
+  (if-let [dir (System/getenv "CAPRA_HOME")]
+    (File. dir)
+    (File. *home* ".capra")))
