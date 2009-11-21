@@ -44,9 +44,7 @@
   "Get a Capra account by name."
   [name]
   (if-let [account (http-get (str *source* "/" name))]
-    (-> account
-      (dissoc :type)
-      (update-in [:packages] format-packages))))
+    (update-in account [:packages] format-packages)))
 
 (defn create
   "Create a new Capra account from a map of values."

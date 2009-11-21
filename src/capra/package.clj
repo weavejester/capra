@@ -10,9 +10,10 @@
 
 (defn get
   "Retrieve package metadata by account, name and version."
-  [account name version]
-  (let [package (http-get (str *source* "/" account "/" name "/" version))]
-    (dissoc package :type)))
+  ([path]
+    (http-get (str *source* "/" path)))
+  ([account name version]
+    (get (str account "/" name "/" version))))
 
 (defn upload-file
   "Upload a file to an existing package."
