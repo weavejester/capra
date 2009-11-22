@@ -57,13 +57,22 @@
   (File. (File. *capra-home* "cache")
          (str (file-info :sha1) ".jar")))
 
+(defn- download-file
+  "Download a package file."
+  [file-info dest-path]
+  (let [temp-file (File/createTempFile "capra" ".jar")]
+    (http-copy (file-info :href) temp-file)
+    (if-not (= (file-info :sha1) (file-sha1 temp-file))
+      (throwf "Remote SHA1 does not match downloaded file")
+      (.renameTo temp-file dest-path))))
+
 (defn cache!
   "Downloads and caches the content of a package."
   [package]
   (doseq [file-info (package :files)]
     (let [filepath (cache-path file-info)]
       (when-not (.exists filepath)
-        (http-copy (file-info :href) filepath))))
+        (download-file file-info filepath))))
   (let [key [(package :account)
              (package :name)
              (package :version)]]
