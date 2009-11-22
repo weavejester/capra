@@ -9,7 +9,8 @@
   (:import java.io.FileOutputStream)
   (:import java.io.InputStreamReader)
   (:import java.io.OutputStreamWriter)
-  (:import java.io.PushbackReader))
+  (:import java.io.PushbackReader)
+  (:import java.security.MessageDigest))
   
 (defn load-resource
   "Return an InputStream to a resource."
@@ -50,3 +51,15 @@
         (when (pos? len)
           (.write out buffer 0 len)
           (recur (.read in buffer)))))))
+
+(defn file-sha1
+  "Find the SHA1 of a file."
+  [filepath]
+  (let [stream (FileInputStream. filepath)
+        buffer (byte-array 4096)
+        digest (MessageDigest/getInstance "SHA-1")]
+    (loop [len (.read stream buffer)]
+      (if (pos? len)
+        (do (.update digest buffer 0 len)
+            (recur (.read stream buffer)))
+        (bytes->hex (.digest digest))))))
