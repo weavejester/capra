@@ -47,14 +47,14 @@
 (defn send-stream
   "Send a stream of data via a HTTP request to a server."
   [conn stream]
-  (.setDoOutput conn)
+  (.setDoOutput conn true)
   (with-connection conn
     #(copy-stream stream (.getOutputStream conn))))
 
 (defn send-data
   "Send data via a HTTP request to a Clojure web service"
   [conn data]
-  (.setDoOutput conn)
+  (.setDoOutput conn true)
   (with-connection conn
     #(write-stream (.getOutputStream conn) data)))
 
