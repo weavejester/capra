@@ -50,7 +50,7 @@
   "Create a new Capra account from a map of values."
   [account]
   (doto (http-connect "POST" *source*)
-        (http-send account)))
+    (send-data account)))
 
 (defn register
   "Register a new Capra account with a random passkey. The passkey is saved to
@@ -65,5 +65,5 @@
   [account]
   (let [name (account :name)]
     (doto (http-connect "PUT" (str *source* "/" name))
-          (basic-auth name (get-key name))
-          (http-send account))))
+      (basic-auth name (get-key name))
+      (send-data account))))

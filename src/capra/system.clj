@@ -1,7 +1,7 @@
 (ns capra.system
   (:import java.io.File))
 
-(def *source* "http://capra-packages.net")
+(def *source* "https://capra-packages.net")
 
 (def *home*
   (or (System/getenv "HOME")

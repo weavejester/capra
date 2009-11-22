@@ -21,9 +21,9 @@
   (let [url  (str *source* "/" account "/" package "/" version)
         pass (capra.account/get-key account)]
     (doto (http-connect "POST" url)
-          (basic-auth account pass)
-          (content-type "application/java-archive")
-          (http-stream (FileInputStream. filepath)))))
+      (basic-auth account pass)
+      (content-type "application/java-archive")
+      (send-stream (FileInputStream. filepath)))))
 
 (defn create
   "Upload a new package with files."
@@ -31,8 +31,8 @@
   (let [account (package :account)
         passkey (capra.account/get-key account)]
     (do (doto (http-connect "POST" (str *source* "/" account))
-              (basic-auth account passkey)
-              (http-send (dissoc package :files)))
+          (basic-auth account passkey)
+          (send-data (dissoc package :files)))
         (doseq [file (package :files)]
           (upload-file account
                        (package :name)

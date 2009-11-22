@@ -1,6 +1,7 @@
 (ns capra.http-client
   "Library for talking to Clojure web services, like capra-server."
   (:use capra.system)
+  (:use capra.ssl)
   (:use capra.util)
   (:import java.io.IOException)
   (:import java.io.FileOutputStream)
@@ -10,18 +11,17 @@
   (:import java.net.HttpURLConnection))
 
 (defn content-type
-  "Set the content type of the HTTP connection."
+  "Set the content type of a connection."
   [conn mime-type]
   (.setRequestProperty conn "Content-Type" mime-type))
 
 (defn http-connect
-  "Create a new HTTP connection."
+  "Open up a HTTP connection to a URL."
   [method url]
-  (let [conn (.openConnection (URL. url))]
-    (doto conn
-      (.setRequestMethod method)
-      (.setDoOutput true)
-      (content-type "application/clojure"))))
+  (doto (.openConnection (URL. url))
+    (.setRequestMethod method)
+    (.setSSLSocketFactory capra-socket-factory)
+    (content-type "application/clojure")))
 
 (defn basic-auth
   "Setup basic auth on a HTTP connection."
@@ -42,25 +42,32 @@
     (finally
       (.disconnect conn))))
 
-(defn http-stream
+(defn send-stream
   "Send a stream of data via a HTTP request to a server."
   [conn stream]
+  (.setDoOutput conn)
   (with-connection conn
     #(copy-stream stream (.getOutputStream conn))))
 
-(defn http-send
+(defn send-data
   "Send data via a HTTP request to a Clojure web service"
   [conn data]
+  (.setDoOutput conn)
   (with-connection conn
     #(write-stream (.getOutputStream conn) data)))
 
-(defn http-get
+(defn fetch-data
   "Send a HTTP GET request to a URL."
+  [conn]
+  (read-stream (.getInputStream conn)))
+
+(defn http-get
+  "Convience function for getting data from a URL."
   [url]
-  (read-stream (.openStream (URL. url))))
+  (fetch-data (http-connect "GET" url)))
 
 (defn http-copy
-  "Download a URL to a location on disk."
+  "Download a HTTP data to a location on disk."
   [src-url dest-path]
   (copy-stream
     (.openStream (URL. src-url))

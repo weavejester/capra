@@ -1,6 +1,7 @@
 (ns capra.util
   "Utility functions for Capra."
   (:refer-clojure :exclude [->>])
+  (:import clojure.lang.RT)
   (:import java.io.File)
   (:import java.io.InputStream)
   (:import java.io.OutputStream)
@@ -15,6 +16,11 @@
   "Throw an Exception object with a message."
   [message]
   (throw (Exception. message)))
+
+(defn load-resource
+  "Return an InputStream to a resource."
+  [path]
+  (.getResourceAsStream (RT/baseLoader) path))
 
 (defmacro with-ns
   "Evaluates body in another namespace. Taken from clojure.contrib/with-ns."
