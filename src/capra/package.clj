@@ -3,6 +3,7 @@
   (:refer-clojure :exclude [get load])
   (:require capra.account)
   (:use capra.http-client)
+  (:use capra.io-utils)
   (:use capra.system)
   (:use capra.util)
   (:import java.io.File)

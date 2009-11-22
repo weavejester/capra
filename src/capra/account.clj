@@ -1,9 +1,11 @@
 (ns capra.account
   "Access and manage accounts on a Capra server."
   (:refer-clojure :exclude [get list])
+  (:use capra.base64)
   (:use capra.http-client)
-  (:use capra.system)
+  (:use capra.io-utils)
   (:use capra.util)
+  (:use capra.system)
   (:import java.io.File))
 
 (def key-file

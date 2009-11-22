@@ -1,5 +1,5 @@
 (ns capra.ssl
-  (:use capra.util)
+  (:use capra.io-utils)
   (:import java.security.KeyStore)
   (:import java.security.cert.CertificateFactory)
   (:import javax.net.ssl.SSLContext)

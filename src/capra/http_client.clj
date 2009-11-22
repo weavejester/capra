@@ -2,6 +2,8 @@
   "Library for talking to Clojure web services, like capra-server."
   (:use capra.system)
   (:use capra.ssl)
+  (:use capra.base64)
+  (:use capra.io-utils)
   (:use capra.util)
   (:import java.io.IOException)
   (:import java.io.FileOutputStream)
