@@ -18,6 +18,17 @@
   [size]
   (make-array Byte/TYPE size))
 
+(defn bytes->hex
+  "Return a list of bytes as a string of hexidecimal characters."
+  [bytes]
+  (let [hex (vec "01234567890abcdef")]
+    (apply str
+      (mapcat
+        (fn [b]
+          [(hex (bit-shift-right b 4))
+           (hex (bit-and b 0x0f))])
+        bytes))))
+
 (defn random-bytes
   "Returns a random byte array of the specified size."
   [size]
