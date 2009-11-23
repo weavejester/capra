@@ -1,10 +1,7 @@
 (ns capra
   "Functions for automatically loading dependencies."
   (:require capra.package)
-  (:use capra.system)
   (:use capra.util))
-
-(create-system-paths)
 
 (with-ns 'clojure.core
   (def in-ns* in-ns)

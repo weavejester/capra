@@ -13,11 +13,9 @@
     (File. dir)
     (File. *home* ".capra")))
 
-(defn create-system-paths
-  "Create all necessary paths if they don't already exist."
-  []
-  (when-not (.exists *capra-home*)
-    (.mkdirs *capra-home*))
-  (let [cache-path (File. *capra-home* "cache")]
-    (when-not (.exists cache-path)
-      (.mkdirs cache-path))))
+(when-not (.exists *capra-home*)
+  (.mkdirs *capra-home*))
+
+(let [cache-path (File. *capra-home* "cache")]
+  (when-not (.exists cache-path)
+    (.mkdirs cache-path)))
