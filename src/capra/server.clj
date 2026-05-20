@@ -9,11 +9,11 @@
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)] 
     (let [[method uri protocol] (str/split line #" ")]
       (assoc! request
-              ::state  :headers
-              :request-method method
-              :uri      uri
-              :protocol protocol
-              :headers  (transient {})))))
+              ::state         :headers
+              :request-method (keyword (str/lower-case method))
+              :uri            uri
+              :protocol       protocol
+              :headers        (transient {})))))
 
 (defn- parse-header [{:keys [headers] :as request} buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
