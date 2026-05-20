@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [teensyp.buffer :as buf]
             [teensyp.server :as tcp])
-  (:import [java.nio.charset StandardCharsets]))
+  (:import [java.net InetSocketAddress]
+           [java.nio.charset StandardCharsets]))
 
 (defn- parse-start-line [request buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)] 
@@ -22,9 +23,18 @@
         (->> (assoc! headers name (str/trim value))
              (assoc! request :headers))))))
 
+(defn- init-request [socket]
+  (let [info   (tcp/socket-info socket)
+        local  ^InetSocketAddress (:local-address info)
+        remote ^InetSocketAddress (:remote-address info)]
+    {::state      :start-line
+     :server-port (.getPort local)
+     :server-name (.getHostString local)
+     :remote-addr (.getHostString remote)}))
+
 (defn- http-handler
-  ([_socket]
-   (transient {::state :start-line}))
+  ([socket]
+   (transient (init-request socket)))
   ([{::keys [state] :as request} socket buffer]
    (if-some [request
              (case state
