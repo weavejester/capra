@@ -18,9 +18,10 @@
 (defn- parse-header [{:keys [headers] :as request} buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (if (str/blank? line)
-      (dissoc! request ::state)
+      (-> (dissoc! request ::state)
+          (assoc! :headers (persistent! headers)))
       (let [[name value] (str/split line #":")]
-        (->> (assoc! headers name (str/trim value))
+        (->> (assoc! headers (str/lower-case name) (str/trim value))
              (assoc! request :headers))))))
 
 (defn- init-request [socket]
@@ -44,7 +45,7 @@
      (recur request socket buffer)
      request))
   ([state _exception]
-   (prn (update (persistent! state) :headers persistent!))))
+   (prn (persistent! state))))
 
 (defn start-server [options]
   (tcp/start-server (assoc options :handler #'http-handler)))
