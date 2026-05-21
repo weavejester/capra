@@ -29,6 +29,7 @@
         local  ^InetSocketAddress (:local-address info)
         remote ^InetSocketAddress (:remote-address info)]
     {::state      :start-line
+     :scheme      :http
      :server-port (.getPort local)
      :server-name (.getHostString local)
      :remote-addr (.getHostString remote)}))
