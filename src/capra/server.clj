@@ -41,7 +41,7 @@
              (case state
                :start-line (parse-start-line request buffer)
                :headers    (parse-header request buffer)
-               (tcp/close socket))]
+               (do (tcp/close socket) nil))]
      (recur request socket buffer)
      request))
   ([state _exception]
