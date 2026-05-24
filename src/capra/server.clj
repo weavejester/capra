@@ -7,19 +7,13 @@
            [java.nio.charset StandardCharsets]
            [java.util.concurrent Executors]))
 
-(defn- test-ring-handler [request]
-  (prn :request request))
-
-(def ^:private test-executor
-  (Executors/newFixedThreadPool 4))
-
-(defn- run-ring-handler [request socket]
+(defn- run-ring-handler [ring-handler request socket stream-opts]
   (let [handler (stream/stream-handler
                  (fn [in _out]
                    (-> (assoc! request :body in)
                        (persistent!)
-                       (test-ring-handler)))
-                 {:executor test-executor})]
+                       (ring-handler)))
+                 stream-opts)]
     {::state   :body
      ::handler handler
      ::context (handler socket)}))
@@ -54,20 +48,36 @@
      :server-name (.getHostString local)
      :remote-addr (.getHostString remote)}))
 
-(defn- http-handler
-  ([socket]
-   (transient (init-request socket)))
-  ([{::keys [state] :as request} socket buffer]
-   (if-some [request
-             (case state
-               :start-line (parse-start-line request buffer)
-               :headers    (parse-header request buffer)
-               :handler    (run-ring-handler request socket)
-               :body       (do (tcp/close socket) nil))]
-     (recur request socket buffer)
-     request))
-  ([_state exception]
-   (when exception (prn :exception exception))))
+(defn- new-default-executor []
+  (Executors/newFixedThreadPool 16))
 
-(defn start-server [options]
-  (tcp/start-server (assoc options :handler #'http-handler)))
+(defn- http-handler [handler {:keys [handler-executor body-buffer-size]}]
+  (let [opts {:executor (or handler-executor (new-default-executor))
+              :read-buffer-size (or body-buffer-size 8192)}]
+    (fn
+      ([socket]
+       (transient (init-request socket)))
+      ([{::keys [state] :as request} socket buffer]
+       (if-some [request
+                 (case state
+                   :start-line (parse-start-line request buffer)
+                   :headers    (parse-header request buffer)
+                   :handler    (run-ring-handler handler request socket opts)
+                   :body       (do (tcp/close socket) nil))]
+          (recur request socket buffer)
+          request))
+      ([_state exception]
+       (when exception (prn :exception exception))))))
+
+(defn start-server [handler options]
+  (tcp/start-server (-> options
+                        (assoc :executor (:socket-executor options))
+                        (assoc :handler (http-handler handler options)))))
+
+(comment
+  (def server
+    (start-server
+     (fn [request] (prn :request request))
+     {:port 4000, :reuse-address? true}))
+  
+  (.close server))
