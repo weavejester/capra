@@ -1,9 +1,28 @@
 (ns capra.server
   (:require [clojure.string :as str]
             [teensyp.buffer :as buf]
-            [teensyp.server :as tcp])
+            [teensyp.server :as tcp]
+            [teensyp.stream :as stream])
   (:import [java.net InetSocketAddress]
-           [java.nio.charset StandardCharsets]))
+           [java.nio.charset StandardCharsets]
+           [java.util.concurrent Executors]))
+
+(defn- test-ring-handler [request]
+  (prn :request request))
+
+(def ^:private test-executor
+  (Executors/newFixedThreadPool 4))
+
+(defn- run-ring-handler [request socket]
+  (let [handler (stream/stream-handler
+                 (fn [in _out]
+                   (-> (assoc! request :body in)
+                       (persistent!)
+                       (test-ring-handler)))
+                 {:executor test-executor})]
+    {::state   :body
+     ::handler handler
+     ::context (handler socket)}))
 
 (defn- parse-start-line [request buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)] 
@@ -18,8 +37,9 @@
 (defn- parse-header [{:keys [headers] :as request} buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (if (str/blank? line)
-      (-> (dissoc! request ::state)
-          (assoc! :headers (persistent! headers)))
+      (assoc! request
+              ::state  :handler
+              :headers (persistent! headers))
       (let [[name value] (str/split line #":")]
         (->> (assoc! headers (str/lower-case name) (str/trim value))
              (assoc! request :headers))))))
@@ -42,11 +62,12 @@
              (case state
                :start-line (parse-start-line request buffer)
                :headers    (parse-header request buffer)
-               (do (tcp/close socket) nil))]
+               :handler    (run-ring-handler request socket)
+               :body       (do (tcp/close socket) nil))]
      (recur request socket buffer)
      request))
-  ([state _exception]
-   (prn (persistent! state))))
+  ([_state exception]
+   (when exception (prn :exception exception))))
 
 (defn start-server [options]
   (tcp/start-server (assoc options :handler #'http-handler)))
