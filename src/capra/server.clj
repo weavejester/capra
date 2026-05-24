@@ -48,6 +48,9 @@
      ::handler handler
      ::context (handler socket)}))
 
+(defn- stream-body [{::keys [handler] :as context} socket buffer]
+  (update context ::context handler socket buffer))
+
 (defn- new-default-executor []
   (Executors/newFixedThreadPool 16))
 
@@ -63,9 +66,11 @@
                    :start-line (parse-start-line request buffer)
                    :headers    (parse-header request buffer)
                    :handler    (run-ring-handler handler request socket opts)
-                   :body       (do (tcp/close socket) nil))]
+                   nil)] 
           (recur request socket buffer)
-          request))
+          (case state
+            :body (stream-body request socket buffer)
+            request)))
       ([_state exception]
        (when exception (prn :exception exception))))))
 
