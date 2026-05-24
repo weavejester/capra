@@ -7,16 +7,15 @@
            [java.nio.charset StandardCharsets]
            [java.util.concurrent Executors]))
 
-(defn- run-ring-handler [ring-handler request socket stream-opts]
-  (let [handler (stream/stream-handler
-                 (fn [in _out]
-                   (-> (assoc! request :body in)
-                       (persistent!)
-                       (ring-handler)))
-                 stream-opts)]
-    {::state   :body
-     ::handler handler
-     ::context (handler socket)}))
+(defn- init-request [socket]
+  (let [info   (tcp/socket-info socket)
+        local  ^InetSocketAddress (:local-address info)
+        remote ^InetSocketAddress (:remote-address info)]
+    {::state      :start-line
+     :scheme      :http
+     :server-port (.getPort local)
+     :server-name (.getHostString local)
+     :remote-addr (.getHostString remote)}))
 
 (defn- parse-start-line [request buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)] 
@@ -38,15 +37,16 @@
         (->> (assoc! headers (str/lower-case name) (str/trim value))
              (assoc! request :headers))))))
 
-(defn- init-request [socket]
-  (let [info   (tcp/socket-info socket)
-        local  ^InetSocketAddress (:local-address info)
-        remote ^InetSocketAddress (:remote-address info)]
-    {::state      :start-line
-     :scheme      :http
-     :server-port (.getPort local)
-     :server-name (.getHostString local)
-     :remote-addr (.getHostString remote)}))
+(defn- run-ring-handler [ring-handler request socket stream-opts]
+  (let [handler (stream/stream-handler
+                 (fn [in _out]
+                   (-> (assoc! request :body in)
+                       (persistent!)
+                       (ring-handler)))
+                 stream-opts)]
+    {::state   :body
+     ::handler handler
+     ::context (handler socket)}))
 
 (defn- new-default-executor []
   (Executors/newFixedThreadPool 16))
