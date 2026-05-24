@@ -1,6 +1,7 @@
 (ns capra.server
   (:require [capra.http.reason :as reason]
             [clojure.string :as str]
+            [ring.core.protocols :as ring]
             [teensyp.buffer :as buf]
             [teensyp.server :as tcp]
             [teensyp.stream :as stream])
@@ -42,8 +43,8 @@
 (defn- write-ascii [^ByteBuffer buffer ^String s]
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
 
-(defn- ring-responder [{:keys [protocol]} socket]
-  (fn [{:keys [status headers]}]
+(defn- ring-responder [{:keys [protocol]} socket out]
+  (fn [{:keys [status headers body] :as response}]
     (let [buffer (ByteBuffer/allocate 32768)
           reason (reason/status->reason status)]
       (write-ascii buffer (str protocol " " status " " reason "\r\n"))
@@ -51,23 +52,27 @@
         (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
       (write-ascii buffer "\r\n")
       (.flip buffer)
-      (tcp/write socket buffer))))
+      (tcp/write socket buffer)
+      (ring/write-body-to-stream body response out))))
 
 (defn- run-ring-handler [ring-handler request socket stream-opts]
-  (let [respond (ring-responder request socket)
-        raise   (fn [_ex])
-        handler (stream/stream-handler
-                 (fn [in _out]
-                   (-> (assoc! request :body in)
-                       (persistent!)
-                       (ring-handler respond raise)))
-                 stream-opts)]
+  (let [handler (stream/stream-handler
+                  (fn [in out]
+                    (let [respond (ring-responder request socket out)
+                          raise   (fn [_ex])]
+                      (-> (assoc! request :body in)
+                          (persistent!)
+                          (ring-handler respond raise))))
+                  stream-opts)]
     {::state   :body
      ::handler handler
      ::context (handler socket)}))
 
-(defn- stream-body [{::keys [handler] :as context} socket buffer]
+(defn- write-body-stream [{::keys [handler] :as context} socket buffer]
   (update context ::context handler socket buffer))
+
+(defn- close-body-stream [{::keys [handler context]} exception]
+  (handler context exception))
 
 (defn- new-default-executor []
   (Executors/newFixedThreadPool 16))
@@ -78,19 +83,22 @@
     (fn
       ([socket]
        (transient (init-request socket)))
-      ([{::keys [state] :as request} socket buffer]
+      ([{::keys [state] :as context} socket buffer]
        (if-some [request
                  (case state
-                   :start-line (parse-start-line request buffer)
-                   :headers    (parse-header request buffer)
-                   :handler    (run-ring-handler handler request socket opts)
+                   :start-line (parse-start-line context buffer)
+                   :headers    (parse-header context buffer)
+                   :handler    (run-ring-handler handler context socket opts)
                    nil)] 
           (recur request socket buffer)
           (case state
-            :body (stream-body request socket buffer)
-            request)))
-      ([_state exception]
-       (when exception (prn :exception exception))))))
+            :body (write-body-stream context socket buffer)
+            context)))
+      ([{::keys [state] :as context} exception]
+       (when exception (prn :exception exception))
+       (case state
+         :body (close-body-stream context exception) 
+         nil)))))
 
 (defn start-server [handler options]
   (tcp/start-server (-> options
