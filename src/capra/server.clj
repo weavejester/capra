@@ -43,9 +43,10 @@
 (defn- write-ascii [^ByteBuffer buffer ^String s]
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
 
-(defn- ring-responder [{:keys [protocol]} socket out]
+(defn- ring-responder
+  [{:keys [protocol]} socket out {:keys [response-buffer-size]}]
   (fn [{:keys [status headers body] :as response}]
-    (let [buffer (ByteBuffer/allocate 32768)
+    (let [buffer (ByteBuffer/allocate response-buffer-size)
           reason (reason/status->reason status)]
       (write-ascii buffer (str protocol " " status " " reason "\r\n"))
       (doseq [kv headers]
@@ -55,15 +56,15 @@
       (tcp/write socket buffer)
       (ring/write-body-to-stream body response out))))
 
-(defn- run-ring-handler [ring-handler request socket stream-opts]
+(defn- run-ring-handler [ring-handler request socket opts]
   (let [handler (stream/stream-handler
                   (fn [in out]
-                    (let [respond (ring-responder request socket out)
+                    (let [respond (ring-responder request socket out opts)
                           raise   (fn [_ex])]
                       (-> (assoc! request :body in)
                           (persistent!)
                           (ring-handler respond raise))))
-                  stream-opts)]
+                  opts)]
     {::state   :body
      ::handler handler
      ::context (handler socket)}))
@@ -74,12 +75,11 @@
 (defn- close-body-stream [{::keys [handler context]} exception]
   (handler context exception))
 
-(defn- new-default-executor []
-  (Executors/newFixedThreadPool 16))
-
-(defn- http-handler [handler {:keys [handler-executor body-buffer-size]}]
-  (let [opts {:executor (or handler-executor (new-default-executor))
-              :read-buffer-size (or body-buffer-size 8192)}]
+(defn- http-handler
+  [handler {:keys [handler-executor body-buffer-size response-buffer-size]}]
+  (let [opts {:executor             handler-executor 
+              :read-buffer-size     body-buffer-size
+              :response-buffer-size response-buffer-size}]
     (fn
       ([socket]
        (transient (init-request socket)))
@@ -100,10 +100,17 @@
          :body (close-body-stream context exception) 
          nil)))))
 
+(defn- new-default-options []
+  {:body-buffer-size     8192
+   :response-buffer-size 32768
+   :handler-executor     (Executors/newFixedThreadPool 16)})
+
 (defn start-server [handler options]
-  (tcp/start-server (-> options
-                        (assoc :executor (:socket-executor options))
-                        (assoc :handler (http-handler handler options)))))
+  (let [handler-opts (merge (new-default-options) options)]
+    (tcp/start-server
+     (-> options
+         (assoc :executor (:socket-executor options))
+         (assoc :handler (http-handler handler handler-opts))))))
 
 (comment
   server
@@ -113,7 +120,8 @@
      (fn [request respond _raise]
        (prn :request request)
        (respond {:status  200
-                 :headers {"Content-Type" "text/html; charset=UTF-8"}
+                 :headers {"Content-Type"   "text/html; charset=UTF-8"
+                           "Content-Length" "11"}
                  :body    "Hello World"}))
      {:port 4000, :reuse-address? true}))
   
