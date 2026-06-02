@@ -5,7 +5,8 @@
             [teensyp.buffer :as buf]
             [teensyp.server :as tcp]
             [teensyp.stream :as stream])
-  (:import [java.net InetSocketAddress]
+  (:import [java.io OutputStream]
+           [java.net InetSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.charset StandardCharsets]
            [java.util.concurrent Executors]))
@@ -44,30 +45,18 @@
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
 
 (let [crlf (.getBytes "\r\n" StandardCharsets/US_ASCII)
-      eof  (.getBytes "0\r\n\r\n")]
-  (defn- write-chunked [socket buffer callback]
-    (if (instance? ByteBuffer buffer)
-      (let [length (format "%X\r\n" (.remaining ^ByteBuffer buffer))]
-        (tcp/write socket (buf/str->buffer length StandardCharsets/US_ASCII))
-        (tcp/write socket buffer)
-        (tcp/write socket (ByteBuffer/wrap crlf) callback))
-      (do (when (= ::tcp/close buffer)
-            (tcp/write socket (ByteBuffer/wrap eof)))
-          (tcp/write socket buffer callback)))))
-
-(defprotocol HttpSocket
-  (set-chunked! [socket chunked?]))
-
-(deftype HttpSocketImpl [socket ^:volatile-mutable chunked?]
-  HttpSocket
-  (set-chunked! [_ new-chunked?] (set! chunked? ^boolean new-chunked?))
-  tcp/Socket
-  (socket-info [_] (tcp/socket-info socket))
-  (queue-write [_ buffer callback]
-    (if chunked?
-      (write-chunked socket buffer callback)
-      (tcp/write socket buffer callback))))
-
+      eof  (.getBytes "0\r\n\r\n")]      
+  (defn- chunked-output-stream ^OutputStream [^OutputStream out]
+    (stream/output-stream
+     (fn write-chunk [^bytes b off len]
+       (let [header (format "%X\r\n" len)]
+         (.write out (.getBytes header StandardCharsets/US_ASCII))
+         (.write out b off len)
+         (.write out crlf)))
+     (fn close-stream []
+       (.write out eof)
+       (.close out)))))
+  
 (defn- chunked-transfer? [{:strs [transfer-encoding]}]
   (boolean (some->> transfer-encoding (re-find #"(^|, *)chunked($|,)"))))
 
@@ -79,27 +68,26 @@
   [{:keys [protocol]} socket out {:keys [response-buffer-size]}]
   (fn [{:keys [status headers body] :as response}]
     (let [buffer  (ByteBuffer/allocate response-buffer-size)
-          reason  (reason/status->reason status)
-          headers (lowercase-headers headers)]
+          reason  (reason/status->reason status)]
       (write-ascii buffer (str protocol " " status " " reason "\r\n"))
       (doseq [kv headers]
         (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
       (write-ascii buffer "\r\n")
       (.flip buffer)
       (tcp/write socket buffer)
-      (set-chunked! socket (chunked-transfer? headers))
-      (ring/write-body-to-stream body response out))))
+      (if (chunked-transfer? (lowercase-headers headers))
+        (ring/write-body-to-stream body response (chunked-output-stream out))
+        (ring/write-body-to-stream body response out)))))
 
 (defn- run-ring-handler [ring-handler request socket opts]
-  (let [socket  (->HttpSocketImpl socket false)
-        handler (stream/stream-handler
-                  (fn [in out]
-                    (let [respond (ring-responder request socket out opts)
-                          raise   (fn [_ex])]
-                      (-> (assoc! request :body in)
-                          (persistent!)
-                          (ring-handler respond raise))))
-                  opts)]
+  (let [handler (stream/stream-handler
+                 (fn [in out]
+                   (let [respond (ring-responder request socket out opts)
+                         raise   (fn [_ex])]
+                     (-> (assoc! request :body in)
+                         (persistent!)
+                         (ring-handler respond raise))))
+                 opts)]
     {::state   :body
      ::handler handler
      ::context (handler socket)}))
