@@ -79,6 +79,9 @@
         (ring/write-body-to-stream body response (chunked-output-stream out))
         (ring/write-body-to-stream body response out)))))
 
+(defn- content-length [{{:strs [content-length]} :headers}]
+  (some-> content-length Long/parseLong))
+
 (defn- run-ring-handler [ring-handler request socket opts]
   (let [handler (stream/stream-handler
                  (fn [in out]
@@ -90,10 +93,24 @@
                  opts)]
     {::step    :body
      ::handler handler
-     ::state   (handler socket)}))
+     ::state   (handler socket)
+     ::length  (or (content-length request) :chunked)}))
 
-(defn- write-body-stream [{::keys [handler] :as state} socket buffer]
-  (update state ::state handler socket buffer))
+(defn- limit-buffer-to-length ^ByteBuffer [^ByteBuffer buffer length]
+  (if (< length (.remaining buffer))
+    (doto (.duplicate buffer) (.limit (+ (.position buffer) length)))
+    buffer))
+
+(defn- write-body-stream
+  [{::keys [handler length] :as state} socket ^ByteBuffer buffer]
+  (let [capped-buffer (limit-buffer-to-length buffer length)
+        buffer-size   (.remaining capped-buffer)
+        state         (update state ::state handler socket capped-buffer)
+        bytes-read    (- buffer-size (.remaining capped-buffer))
+        length        (- length bytes-read)]
+    (.position buffer (.position capped-buffer))
+    (-> (assoc state ::length length)
+        (cond-> (<= length 0) (update ::state handler socket nil)))))
 
 (defn- close-body-stream [{::keys [handler state]} exception]
   (handler state exception))
@@ -145,7 +162,7 @@
        (respond {:status  200
                  :headers {"Content-Type"      "text/html; charset=UTF-8"
                            "Transfer-Encoding" "chunked"}
-                 :body    "Hello World"}))
+                 :body    (str "body=" (slurp (:body request)))}))
      {:port 4000, :reuse-address? true}))
   
   (.close server))
