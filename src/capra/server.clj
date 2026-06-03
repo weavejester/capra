@@ -97,21 +97,43 @@
       ::state   (handler socket)
       ::length  (or (content-length request) :chunked)})))
 
+(defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
+  (let [chunked-buffer (.duplicate buffer)]
+    (when-some [head (buf/read-line chunked-buffer StandardCharsets/US_ASCII)]
+      (let [start  (.position chunked-buffer)
+            length (Long/parseLong head 16)]
+        (when (<= (+ length 2) (.remaining buffer))
+          (.position buffer (+ start length 2))
+          (doto chunked-buffer (.limit (+ start length))))))))
+
+(defn- write-chunked-body-stream
+  [{::keys [handler state] :as st} socket buffer]
+  (when-some [chunk-buf (read-chunk! buffer)]
+    (handler state socket (when (.hasRemaining chunk-buf) chunk-buf))
+    st))
+
 (defn- limit-buffer-to-length ^ByteBuffer [^ByteBuffer buffer length]
   (if (< length (.remaining buffer))
     (doto (.duplicate buffer) (.limit (+ (.position buffer) length)))
     buffer))
 
-(defn- write-body-stream
+(defn- write-known-length-body-stream
   [{::keys [handler length state] :as st} socket ^ByteBuffer buffer]
-  (let [capped-buffer (limit-buffer-to-length buffer length)
-        buffer-size   (.remaining capped-buffer)
-        _state        (handler state socket capped-buffer)
-        bytes-read    (- buffer-size (.remaining capped-buffer))
-        length        (- length bytes-read)]
-    (.position buffer (.position capped-buffer))
-    (when (<= length 0) (handler state socket nil))
-    (assoc! st ::length length)))
+  (when (pos? length)
+    (let [capped-buffer (limit-buffer-to-length buffer length)
+          buffer-size   (.remaining capped-buffer)
+          _state        (handler state socket capped-buffer)
+          bytes-read    (- buffer-size (.remaining capped-buffer))
+          length        (- length bytes-read)]
+      (.position buffer (.position capped-buffer))
+      (when (<= length 0) (handler state socket nil))
+      (assoc! st ::length length))))
+
+(defn- write-body-stream [{::keys [handler length] :as state} socket buffer]
+  (cond
+    (= length :chunked) (write-chunked-body-stream state socket buffer)
+    (integer? length)   (write-known-length-body-stream state socket buffer)
+    :else               (handler state socket nil)))
 
 (defn- close-body-stream [{::keys [handler state]} exception]
   (handler state exception))
@@ -130,11 +152,10 @@
                    :start-line (parse-start-line state buffer)
                    :headers    (parse-header state buffer)
                    :handler    (run-ring-handler handler state socket opts)
+                   :body       (write-body-stream state socket buffer)
                    nil)] 
           (recur state socket buffer)
-          (case step
-            :body (write-body-stream state socket buffer)
-            state)))
+          state))
       ([{::keys [step] :as state} exception]
        (when exception (prn :exception exception))
        (case step
@@ -159,7 +180,6 @@
   (def server
     (start-server
      (fn [request respond _raise]
-       (prn :request request)
        (respond {:status  200
                  :headers {"Content-Type"      "text/html; charset=UTF-8"
                            "Transfer-Encoding" "chunked"}
