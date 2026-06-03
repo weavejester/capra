@@ -15,11 +15,11 @@
   (let [info   (tcp/socket-info socket)
         local  ^InetSocketAddress (:local-address info)
         remote ^InetSocketAddress (:remote-address info)]
-    {::step       :start-line
-     :scheme      :http
-     :server-port (.getPort local)
-     :server-name (.getHostString local)
-     :remote-addr (.getHostString remote)}))
+    (transient {::step       :start-line
+                :scheme      :http
+                :server-port (.getPort local)
+                :server-name (.getHostString local)
+                :remote-addr (.getHostString remote)})))
 
 (defn- parse-start-line [state buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)] 
@@ -91,10 +91,11 @@
                          (persistent!)
                          (ring-handler respond raise))))
                  opts)]
-    {::step    :body
-     ::handler handler
-     ::state   (handler socket)
-     ::length  (or (content-length request) :chunked)}))
+    (transient
+     {::step    :body
+      ::handler handler
+      ::state   (handler socket)
+      ::length  (or (content-length request) :chunked)})))
 
 (defn- limit-buffer-to-length ^ByteBuffer [^ByteBuffer buffer length]
   (if (< length (.remaining buffer))
@@ -102,15 +103,15 @@
     buffer))
 
 (defn- write-body-stream
-  [{::keys [handler length] :as state} socket ^ByteBuffer buffer]
+  [{::keys [handler length state] :as st} socket ^ByteBuffer buffer]
   (let [capped-buffer (limit-buffer-to-length buffer length)
         buffer-size   (.remaining capped-buffer)
-        state         (update state ::state handler socket capped-buffer)
+        _state        (handler state socket capped-buffer)
         bytes-read    (- buffer-size (.remaining capped-buffer))
         length        (- length bytes-read)]
     (.position buffer (.position capped-buffer))
-    (-> (assoc state ::length length)
-        (cond-> (<= length 0) (update ::state handler socket nil)))))
+    (when (<= length 0) (handler state socket nil))
+    (assoc! st ::length length)))
 
 (defn- close-body-stream [{::keys [handler state]} exception]
   (handler state exception))
@@ -122,7 +123,7 @@
               :response-buffer-size response-buffer-size}]
     (fn
       ([socket]
-       (transient (init-request socket)))
+       (init-request socket))
       ([{::keys [step] :as state} socket buffer]
        (if-some [state
                  (case step
