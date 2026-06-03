@@ -15,31 +15,31 @@
   (let [info   (tcp/socket-info socket)
         local  ^InetSocketAddress (:local-address info)
         remote ^InetSocketAddress (:remote-address info)]
-    {::state      :start-line
+    {::step       :start-line
      :scheme      :http
      :server-port (.getPort local)
      :server-name (.getHostString local)
      :remote-addr (.getHostString remote)}))
 
-(defn- parse-start-line [request buffer]
+(defn- parse-start-line [state buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)] 
     (let [[method uri protocol] (str/split line #" ")]
-      (assoc! request
-              ::state         :headers
+      (assoc! state
+              ::step          :headers
               :request-method (keyword (str/lower-case method))
               :uri            uri
               :protocol       protocol
               :headers        (transient {})))))
 
-(defn- parse-header [{:keys [headers] :as request} buffer]
+(defn- parse-header [{:keys [headers] :as state} buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (if (str/blank? line)
-      (assoc! request
-              ::state  :handler
+      (assoc! state
+              ::step   :handler
               :headers (persistent! headers))
       (let [[name value] (str/split line #":")]
         (->> (assoc! headers (str/lower-case name) (str/trim value))
-             (assoc! request :headers))))))
+             (assoc! state :headers))))))
 
 (defn- write-ascii [^ByteBuffer buffer ^String s]
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
@@ -88,15 +88,15 @@
                          (persistent!)
                          (ring-handler respond raise))))
                  opts)]
-    {::state   :body
+    {::step    :body
      ::handler handler
-     ::context (handler socket)}))
+     ::state   (handler socket)}))
 
-(defn- write-body-stream [{::keys [handler] :as context} socket buffer]
-  (update context ::context handler socket buffer))
+(defn- write-body-stream [{::keys [handler] :as state} socket buffer]
+  (update state ::state handler socket buffer))
 
-(defn- close-body-stream [{::keys [handler context]} exception]
-  (handler context exception))
+(defn- close-body-stream [{::keys [handler state]} exception]
+  (handler state exception))
 
 (defn- http-handler
   [handler {:keys [handler-executor body-buffer-size response-buffer-size]}]
@@ -106,21 +106,21 @@
     (fn
       ([socket]
        (transient (init-request socket)))
-      ([{::keys [state] :as context} socket buffer]
-       (if-some [request
-                 (case state
-                   :start-line (parse-start-line context buffer)
-                   :headers    (parse-header context buffer)
-                   :handler    (run-ring-handler handler context socket opts)
+      ([{::keys [step] :as state} socket buffer]
+       (if-some [state
+                 (case step
+                   :start-line (parse-start-line state buffer)
+                   :headers    (parse-header state buffer)
+                   :handler    (run-ring-handler handler state socket opts)
                    nil)] 
-          (recur request socket buffer)
-          (case state
-            :body (write-body-stream context socket buffer)
-            context)))
-      ([{::keys [state] :as context} exception]
+          (recur state socket buffer)
+          (case step
+            :body (write-body-stream state socket buffer)
+            state)))
+      ([{::keys [step] :as state} exception]
        (when exception (prn :exception exception))
-       (case state
-         :body (close-body-stream context exception) 
+       (case step
+         :body (close-body-stream state exception) 
          nil)))))
 
 (defn- new-default-options []
