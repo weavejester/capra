@@ -86,21 +86,49 @@
   (when transfer-encoding
     (into #{} (map keyword) (str/split transfer-encoding #"\s*,\s*"))))
 
+(defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
+  (or (nil? encoding) (.equalsIgnoreCase ^String encoding "chunked")))
+
+(defn- transfer-encoding-error
+  [{:keys [protocol] {:strs [transfer-encoding]} :headers}] 
+  (let [body (str "Unsupported request transfer encoding: \""
+                    transfer-encoding "\".\n"
+                    "Only \"chunked\" transfer encoding supported.")]
+      (str protocol " 501 Not Implemented\r\n"
+           "Connection: close\r\n"
+           "Content-Type: text/plain; charset=UTF-8\r\n"
+           "Content-Length: "
+           (count (.getBytes body StandardCharsets/US_ASCII))
+           "\r\n\r\n" body)))
+
+(defn- queue-error-response [socket response-str]
+  (let [response-bytes (.getBytes response-str StandardCharsets/US_ASCII)]
+    (tcp/write socket (ByteBuffer/wrap response-bytes))
+    (tcp/close socket)
+    nil))
+
+(defn- ring->stream-handler [ring-handler request socket opts]
+  (stream/stream-handler
+   (fn [in out]
+     (let [respond (ring-responder request socket out opts)
+           raise   (fn [_ex])]
+       (-> (assoc! request :body in)
+           (persistent!)
+           (ring-handler respond raise)))
+     opts)))
+
 (defn- run-ring-handler [ring-handler request socket opts]
-  (let [handler (stream/stream-handler
-                 (fn [in out]
-                   (let [respond (ring-responder request socket out opts)
-                         raise   (fn [_ex])]
-                     (-> (assoc! request :body in)
-                         (persistent!)
-                         (ring-handler respond raise))))
-                 opts)]
-    (transient
-     {::step     :body
-      ::handler  handler
-      ::state    (handler socket)
-      ::encoding (transfer-encoding request)
-      ::length   (content-length request)})))
+  (cond
+    (not (valid-transfer-encoding? request))
+    (queue-error-response socket (transfer-encoding-error request))
+    :else
+    (let [handler (ring->stream-handler ring-handler request socket opts)]
+      (transient
+       {::step     :body
+        ::handler  handler
+        ::state    (handler socket)
+        ::encoding (transfer-encoding request)
+        ::length   (content-length request)}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
