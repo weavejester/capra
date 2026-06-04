@@ -97,12 +97,6 @@
            (count (.getBytes body StandardCharsets/US_ASCII))
            "\r\n\r\n" body)))
 
-(defn- queue-error-response [socket response-str]
-  (let [response-bytes (.getBytes response-str StandardCharsets/US_ASCII)]
-    (tcp/write socket (ByteBuffer/wrap response-bytes))
-    (tcp/close socket)
-    nil))
-
 (defn- ring->stream-handler [ring-handler request socket opts]
   (stream/stream-handler
    (fn [in out]
@@ -114,10 +108,9 @@
      opts)))
 
 (defn- run-ring-handler [ring-handler request socket opts]
-  (cond
-    (not (valid-transfer-encoding? request))
-    (queue-error-response socket (transfer-encoding-error request))
-    :else
+  (if (not (valid-transfer-encoding? request))
+    {::step     :error
+     ::response (transfer-encoding-error request)}
     (let [handler (ring->stream-handler ring-handler request socket opts)]
       (transient
        {::step     :body
@@ -170,6 +163,12 @@
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
 
+(defn- write-error-response [{::keys [response]} socket]
+  (let [response-bytes (.getBytes ^String response StandardCharsets/US_ASCII)]
+    (tcp/write socket (ByteBuffer/wrap response-bytes))
+    (tcp/close socket)
+    nil))
+
 (defn- http-handler
   [handler {:keys [handler-executor body-buffer-size response-buffer-size]}]
   (let [opts {:executor             handler-executor 
@@ -185,6 +184,7 @@
                    :headers    (parse-header state buffer)
                    :handler    (run-ring-handler handler state socket opts)
                    :body       (read-body-stream state socket buffer)
+                   :error      (write-error-response state socket)
                    nil)] 
           (recur state socket buffer)
           state))
