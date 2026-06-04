@@ -111,7 +111,7 @@
           (.position buffer (+ start length 2))
           (doto chunked-buffer (.limit (+ start length))))))))
 
-(defn- write-chunked-body-stream
+(defn- read-chunked-body-stream
   [{::keys [handler state] :as st} socket buffer]
   (when-some [chunk-buf (read-chunk! buffer)]
     (handler state socket (when (.hasRemaining chunk-buf) chunk-buf))
@@ -122,7 +122,7 @@
     (doto (.duplicate buffer) (.limit (+ (.position buffer) length)))
     buffer))
 
-(defn- write-known-length-body-stream
+(defn- read-known-length-body-stream
   [{::keys [handler length state] :as st} socket ^ByteBuffer buffer]
   (when (pos? length)
     (let [capped-buffer (limit-buffer-to-length buffer length)
@@ -137,10 +137,10 @@
 (defn- close-body-stream [{::keys [handler state]} socket]
   (handler state socket nil))
 
-(defn- write-body-stream [{::keys [length encoding] :as state} socket buffer]
+(defn- read-body-stream [{::keys [length encoding] :as state} socket buffer]
   (cond
-    (integer? length)   (write-known-length-body-stream state socket buffer)
-    (:chunked encoding) (write-chunked-body-stream state socket buffer)
+    (integer? length)   (read-known-length-body-stream state socket buffer)
+    (:chunked encoding) (read-chunked-body-stream state socket buffer)
     :else               (close-body-stream state socket)))
 
 (defn- close-response [{::keys [handler state]} exception]
@@ -160,7 +160,7 @@
                    :start-line (parse-start-line state buffer)
                    :headers    (parse-header state buffer)
                    :handler    (run-ring-handler handler state socket opts)
-                   :body       (write-body-stream state socket buffer)
+                   :body       (read-body-stream state socket buffer)
                    nil)] 
           (recur state socket buffer)
           state))
