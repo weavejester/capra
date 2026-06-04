@@ -82,10 +82,6 @@
 (defn- content-length [{{:strs [content-length]} :headers}]
   (some-> content-length Long/parseLong))
 
-(defn- transfer-encoding [{{:strs [transfer-encoding]} :headers}]
-  (when transfer-encoding
-    (into #{} (map keyword) (str/split transfer-encoding #"\s*,\s*"))))
-
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase ^String encoding "chunked")))
 
@@ -127,7 +123,7 @@
        {::step     :body
         ::handler  handler
         ::state    (handler socket)
-        ::encoding (transfer-encoding request)
+        ::chunked? (= (-> request :headers (get "transfer-encoding")) "chunked")
         ::length   (content-length request)}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
@@ -165,11 +161,11 @@
 (defn- close-body-stream [{::keys [handler state]} socket]
   (handler state socket nil))
 
-(defn- read-body-stream [{::keys [length encoding] :as state} socket buffer]
+(defn- read-body-stream [state socket buffer]
   (cond
-    (integer? length)   (read-known-length-body-stream state socket buffer)
-    (:chunked encoding) (read-chunked-body-stream state socket buffer)
-    :else               (close-body-stream state socket)))
+    (::length state)   (read-known-length-body-stream state socket buffer)
+    (::chunked? state) (read-chunked-body-stream state socket buffer)
+    :else              (close-body-stream state socket)))
 
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
