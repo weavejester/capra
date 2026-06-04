@@ -82,6 +82,10 @@
 (defn- content-length [{{:strs [content-length]} :headers}]
   (some-> content-length Long/parseLong))
 
+(defn- transfer-encoding [{{:strs [transfer-encoding]} :headers}]
+  (when transfer-encoding
+    (into #{} (map keyword) (str/split transfer-encoding #"\s*,\s*"))))
+
 (defn- run-ring-handler [ring-handler request socket opts]
   (let [handler (stream/stream-handler
                  (fn [in out]
@@ -92,10 +96,11 @@
                          (ring-handler respond raise))))
                  opts)]
     (transient
-     {::step    :body
-      ::handler handler
-      ::state   (handler socket)
-      ::length  (or (content-length request) :chunked)})))
+     {::step     :body
+      ::handler  handler
+      ::state    (handler socket)
+      ::encoding (transfer-encoding request)
+      ::length   (content-length request)})))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
@@ -129,13 +134,16 @@
       (when (<= length 0) (handler state socket nil))
       (assoc! st ::length length))))
 
-(defn- write-body-stream [{::keys [handler length] :as state} socket buffer]
-  (cond
-    (= length :chunked) (write-chunked-body-stream state socket buffer)
-    (integer? length)   (write-known-length-body-stream state socket buffer)
-    :else               (handler state socket nil)))
+(defn- close-body-stream [{::keys [handler state]} socket]
+  (handler state socket nil))
 
-(defn- close-body-stream [{::keys [handler state]} exception]
+(defn- write-body-stream [{::keys [length encoding] :as state} socket buffer]
+  (cond
+    (integer? length)   (write-known-length-body-stream state socket buffer)
+    (:chunked encoding) (write-chunked-body-stream state socket buffer)
+    :else               (close-body-stream state socket)))
+
+(defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
 
 (defn- http-handler
@@ -159,7 +167,7 @@
       ([{::keys [step] :as state} exception]
        (when exception (prn :exception exception))
        (case step
-         :body (close-body-stream state exception) 
+         :body (close-response state exception) 
          nil)))))
 
 (defn- new-default-options []
