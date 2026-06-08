@@ -97,27 +97,50 @@
            (count (.getBytes body StandardCharsets/US_ASCII))
            "\r\n\r\n" body)))
 
-(defn- ring->stream-handler [ring-handler request socket opts]
+(defn- wrap-output-stream-close ^OutputStream [^OutputStream out callback]
+  (stream/output-stream
+   (fn write [b off len]
+     (.write out b off len))
+   (fn close []
+     (.close out)
+     (callback))))
+
+(defn- ring->stream-handler [ring-handler request socket callback opts]
   (stream/stream-handler
    (fn [in out]
-     (let [respond (ring-responder request socket out opts)
+     (let [out     (wrap-output-stream-close out callback)
+           respond (ring-responder request socket out opts)
            raise   (fn [_ex])]
        (-> (assoc! request :body in)
            (persistent!)
-           (ring-handler respond raise)))
-     opts)))
+           (ring-handler respond raise))))
+   opts))
 
-(defn- run-ring-handler [ring-handler request socket opts]
-  (if (not (valid-transfer-encoding? request))
+(defn- keepalive-socket [socket]
+  (reify tcp/Socket
+    (queue-control [_ c f] (tcp/queue-control socket c f))
+    (socket-info   [_]     (tcp/socket-info socket))
+    (queue-write [_ buffer callback]
+      (if (= buffer ::tcp/close)
+        (callback)
+        (tcp/queue-write socket buffer callback))))) 
+
+(defn- run-ring-handler [ring-handler req socket opts]
+  (if (not (valid-transfer-encoding? req))
     {::step     :error
-     ::response (transfer-encoding-error request)}
-    (let [handler (ring->stream-handler ring-handler request socket opts)]
+     ::response (transfer-encoding-error req)}
+    (let [next?    (volatile! false)
+          callback #(do (vreset! next? true)
+                        (tcp/resume-reads socket)
+                        (tcp/force-read socket)) 
+          handler  (ring->stream-handler ring-handler req socket callback opts)]
       (transient
        {::step     :body
         ::handler  handler
-        ::state    (handler socket)
-        ::chunked? (= (-> request :headers (get "transfer-encoding")) "chunked")
-        ::length   (content-length request)}))))
+        ::state    (handler (keepalive-socket socket))
+        ::next?    next?
+        ::chunked? (= (-> req :headers (get "transfer-encoding")) "chunked")
+        ::length   (content-length req)}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
@@ -128,11 +151,16 @@
           (.position buffer (+ start length 2))
           (doto chunked-buffer (.limit (+ start length))))))))
 
+(defn- next-request [{::keys [handler state next?]} socket]
+  (handler state socket nil)
+  {::step :buffer ::next? next?})
+
 (defn- read-chunked-body-stream
   [{::keys [handler state] :as st} socket buffer]
   (when-some [chunk-buf (read-chunk! buffer)]
-    (handler state socket (when (.hasRemaining chunk-buf) chunk-buf))
-    st))
+    (if (.hasRemaining chunk-buf)
+      (do (handler state socket chunk-buf) st)
+      (next-request st socket)))) 
 
 (defn- limit-buffer-to-length ^ByteBuffer [^ByteBuffer buffer length]
   (if (< length (.remaining buffer))
@@ -141,27 +169,31 @@
 
 (defn- read-known-length-body-stream
   [{::keys [handler length state] :as st} socket ^ByteBuffer buffer]
-  (when (pos? length)
-    (let [capped-buffer (limit-buffer-to-length buffer length)
-          buffer-size   (.remaining capped-buffer)
-          _state        (handler state socket capped-buffer)
-          bytes-read    (- buffer-size (.remaining capped-buffer))
-          length        (- length bytes-read)]
-      (.position buffer (.position capped-buffer))
-      (when (<= length 0) (handler state socket nil))
-      (assoc! st ::length length))))
-
-(defn- close-body-stream [{::keys [handler state]} socket]
-  (handler state socket nil))
+  (if (pos? length)
+    (when (.hasRemaining buffer)
+      (let [capped-buffer (limit-buffer-to-length buffer length)
+            buffer-size   (.remaining capped-buffer)
+            _state        (handler state socket capped-buffer)
+            bytes-read    (- buffer-size (.remaining capped-buffer))
+            length        (- length bytes-read)]
+        (.position buffer (.position capped-buffer))
+        (assoc! st ::length length)))
+    (next-request st socket)))
 
 (defn- read-body-stream [state socket buffer]
   (cond
     (::length state)   (read-known-length-body-stream state socket buffer)
     (::chunked? state) (read-chunked-body-stream state socket buffer)
-    :else              (close-body-stream state socket)))
+    :else              (next-request state socket)))
 
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
+
+(defn- buffer-next-request [{::keys [next?]} socket ^ByteBuffer buffer]
+  (if @next?
+    (init-request socket)
+    (when (zero? (.capacity buffer))
+      (tcp/pause-reads socket))))
 
 (defn- write-error-response [{::keys [response]} socket]
   (let [response-bytes (.getBytes ^String response StandardCharsets/US_ASCII)]
@@ -184,6 +216,7 @@
                    :headers    (parse-header state buffer)
                    :handler    (run-ring-handler handler state socket opts)
                    :body       (read-body-stream state socket buffer)
+                   :buffer     (buffer-next-request state socket buffer)
                    :error      (write-error-response state socket)
                    nil)] 
           (recur state socket buffer)
