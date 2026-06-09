@@ -244,13 +244,29 @@
          :body (close-response state exception) 
          nil)))))
 
+(defn- ensure-body-closes [body]
+  (reify ring/StreamableResponseBody
+    (write-body-to-stream [_ response output-stream]
+      (try (ring/write-body-to-stream body response output-stream)
+           (finally (.close output-stream))))))
+
+(defn- sync->async-handler [handler]
+  (fn [request respond raise]
+    (let [response (try (handler request)
+                        (catch Exception ex (raise ex) ::error))]
+      (when (not= response ::error)
+        (respond (update response :body ensure-body-closes))))))
+
 (defn- new-default-options []
   {:body-buffer-size     8192
    :response-buffer-size 32768
    :handler-executor     (Executors/newFixedThreadPool 16)})
 
 (defn start-server [handler options]
-  (let [handler-opts (merge (new-default-options) options)]
+  (let [handler-opts (merge (new-default-options) options)
+        handler      (if (:async? handler-opts)
+                       handler
+                       (sync->async-handler handler))]
     (tcp/start-server
      (-> options
          (assoc :executor (:socket-executor options))
@@ -267,6 +283,6 @@
                            ;"Transfer-Encoding" "chunked"
                            "Content-Length"    "8"}
                  :body    (str "body=" (slurp (:body request)))}))
-     {:port 4000, :reuse-address? true}))
+     {:port 4000, :async? true, :reuse-address? true}))
   
   (.close server))
