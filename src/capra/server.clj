@@ -9,7 +9,8 @@
            [java.net InetSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.charset StandardCharsets]
-           [java.util.concurrent Executors]))
+           [java.util.concurrent Executors]
+           [java.util.concurrent.atomic AtomicInteger]))
 
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
@@ -58,12 +59,12 @@
        (.close out)))))
 
 (defn- limited-output-stream ^OutputStream [^OutputStream out limit]
-  (let [limit (atom limit)]
+  (let [limit (AtomicInteger. limit)]
     (stream/output-stream
      (fn write [^bytes b off len]
-       (let [[old-limit new-limit] (swap-vals! limit #(max 0 (- % len)))]
-         (when (> old-limit new-limit)
-           (.write out b off (min len (- old-limit new-limit))))))
+       (let [len (min len (+ len (.addAndGet limit (- len))))]
+         (when (pos? len)
+           (.write out b off len))))
      (fn close []
        (.close out)))))
 
