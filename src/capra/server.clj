@@ -47,7 +47,7 @@
 
 (let [crlf (.getBytes "\r\n" StandardCharsets/US_ASCII)
       eof  (.getBytes "0\r\n\r\n")]      
-  (defn- chunked-output-stream ^OutputStream [^OutputStream out]
+  (defn- chunked-output-stream ^OutputStream [^OutputStream out complete]
     (stream/output-stream
      (fn write-chunk [^bytes b off len]
        (let [header (format "%X\r\n" len)]
@@ -56,9 +56,10 @@
          (.write out crlf)))
      (fn close-stream []
        (.write out eof)
-       (.close out)))))
+       (.close out)
+       (complete)))))
 
-(defn- limited-output-stream ^OutputStream [^OutputStream out limit]
+(defn- limited-output-stream ^OutputStream [^OutputStream out limit complete]
   (let [limit (AtomicInteger. limit)]
     (stream/output-stream
      (fn write [^bytes b off len]
@@ -66,7 +67,8 @@
          (when (pos? len)
            (.write out b off len))))
      (fn close []
-       (.close out)))))
+       (.close out)
+       (complete)))))
 
 (defn- chunked-transfer? [{:strs [transfer-encoding]}]
   (boolean (some->> transfer-encoding (re-find #"(^|, *)chunked($|,)"))))
@@ -90,18 +92,17 @@
   (persistent! (reduce-kv #(assoc! %1 (str/lower-case %2) %3)
                           (transient {}) headers)))
 
-(defn- write-response-body [out {:keys [headers body] :as response}]
- (let [headers (lowercase-headers headers)]
-   (if (chunked-transfer? headers)
-     (ring/write-body-to-stream body response (chunked-output-stream out))
-     (let [length (content-length headers)
-           out    (limited-output-stream out length)]
-       (ring/write-body-to-stream body response out)))))
+(defn- write-response-body [out {:keys [headers body] :as response} callback]
+ (let [headers (lowercase-headers headers)
+       out     (if (chunked-transfer? headers)
+                 (chunked-output-stream out callback)
+                 (limited-output-stream out (content-length headers) callback))]
+   (ring/write-body-to-stream body response out)))
 
-(defn- ring-responder [request socket out options]
+(defn- ring-responder [request socket out callback options]
   (fn [response]
     (write-response-head socket request response options)
-    (write-response-body out response)))
+    (write-response-body out response callback)))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase ^String encoding "chunked")))
@@ -118,20 +119,11 @@
            (count (.getBytes body StandardCharsets/US_ASCII))
            "\r\n\r\n" body)))
 
-(defn- wrap-output-stream-close ^OutputStream [^OutputStream out callback]
-  (stream/output-stream
-   (fn write [b off len]
-     (.write out b off len))
-   (fn close []
-     (.close out)
-     (callback))))
-
 (defn- ring->stream-handler [ring-handler request socket callback opts]
   (stream/stream-handler
    (fn [in out]
-     (let [out     (wrap-output-stream-close out callback)
-           request (persistent! (assoc! request :body in))
-           respond (ring-responder request socket out opts)
+     (let [request (persistent! (assoc! request :body in))
+           respond (ring-responder request socket out callback opts)
            raise   (fn [_ex])]
        (ring-handler request respond raise)))
    opts))
