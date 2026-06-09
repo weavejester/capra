@@ -153,7 +153,7 @@
         ::handler  handler
         ::state    (handler (keepalive-socket socket))
         ::next?    next?
-        ::chunked? (= (-> req :headers (get "transfer-encoding")) "chunked")
+        ::chunked? (-> req :headers chunked-transfer?)
         ::length   (-> req :headers content-length)}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
