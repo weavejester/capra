@@ -1,4 +1,4 @@
-# Capra
+# Capra [![Build Status](https://github.com/weavejester/capra/actions/workflows/test.yml/badge.svg)](https://github.com/weavejester/capra/actions/workflows/test.yml)
 
 TODO
 
