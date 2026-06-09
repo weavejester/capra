@@ -56,9 +56,22 @@
      (fn close-stream []
        (.write out eof)
        (.close out)))))
-  
+
+(defn- limited-output-stream ^OutputStream [^OutputStream out limit]
+  (let [limit (atom limit)]
+    (stream/output-stream
+     (fn write [^bytes b off len]
+       (let [[old-limit new-limit] (swap-vals! limit #(max 0 (- % len)))]
+         (when (> old-limit new-limit)
+           (.write out b off (min len (- old-limit new-limit))))))
+     (fn close []
+       (.close out)))))
+
 (defn- chunked-transfer? [{:strs [transfer-encoding]}]
   (boolean (some->> transfer-encoding (re-find #"(^|, *)chunked($|,)"))))
+
+(defn- content-length [{:strs [content-length]}]
+  (some-> content-length Long/parseLong))
 
 (defn- lowercase-headers [headers]
   (persistent! (reduce-kv #(assoc! %1 (str/lower-case %2) %3)
@@ -67,20 +80,20 @@
 (defn- ring-responder
   [{:keys [protocol]} socket out {:keys [response-buffer-size]}]
   (fn [{:keys [status headers body] :as response}]
-    (let [buffer  (ByteBuffer/allocate response-buffer-size)
-          reason  (reason/status->reason status)]
+    (let [buffer (ByteBuffer/allocate response-buffer-size)
+          reason (reason/status->reason status)]
       (write-ascii buffer (str protocol " " status " " reason "\r\n"))
       (doseq [kv headers]
         (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
       (write-ascii buffer "\r\n")
       (.flip buffer)
       (tcp/write socket buffer)
-      (if (chunked-transfer? (lowercase-headers headers))
-        (ring/write-body-to-stream body response (chunked-output-stream out))
-        (ring/write-body-to-stream body response out)))))
-
-(defn- content-length [{{:strs [content-length]} :headers}]
-  (some-> content-length Long/parseLong))
+      (let [headers (lowercase-headers headers)]
+        (if (chunked-transfer? headers)
+          (ring/write-body-to-stream body response (chunked-output-stream out))
+          (let [length (content-length headers)
+                out    (limited-output-stream out length)]
+            (ring/write-body-to-stream body response out)))))))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase ^String encoding "chunked")))
@@ -140,7 +153,7 @@
         ::state    (handler (keepalive-socket socket))
         ::next?    next?
         ::chunked? (= (-> req :headers (get "transfer-encoding")) "chunked")
-        ::length   (content-length req)}))))
+        ::length   (-> req :headers content-length)}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
@@ -247,7 +260,8 @@
      (fn [request respond _raise]
        (respond {:status  200
                  :headers {"Content-Type"      "text/html; charset=UTF-8"
-                           "Transfer-Encoding" "chunked"}
+                           ;"Transfer-Encoding" "chunked"
+                           "Content-Length"    "8"}
                  :body    (str "body=" (slurp (:body request)))}))
      {:port 4000, :reuse-address? true}))
   
