@@ -105,7 +105,7 @@
     (write-response-body out response callback)))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
-  (or (nil? encoding) (.equalsIgnoreCase ^String encoding "chunked")))
+  (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
 
 (defn- transfer-encoding-error
   [{:keys [protocol] {:strs [transfer-encoding]} :headers}] 
@@ -137,6 +137,10 @@
         (callback)
         (tcp/queue-write socket buffer callback))))) 
 
+(defn- close-connection? [{:keys [protocol] {:strs [connection]} :headers}]
+  (or (and (nil? connection) (= protocol "HTTP/1.0"))
+      (.equalsIgnoreCase "close" connection)))
+
 (defn- run-ring-handler [ring-handler req socket opts]
   (if (not (valid-transfer-encoding? req))
     {::step     :error
@@ -145,11 +149,12 @@
           callback #(do (vreset! next? true)
                         (tcp/resume-reads socket)
                         (tcp/force-read socket)) 
-          handler  (ring->stream-handler ring-handler req socket callback opts)]
+          handler  (ring->stream-handler ring-handler req socket callback opts)
+          socket   (if (close-connection? req) socket (keepalive-socket socket))]
       (transient
        {::step     :body
         ::handler  handler
-        ::state    (handler (keepalive-socket socket))
+        ::state    (handler socket)
         ::next?    next?
         ::chunked? (-> req :headers chunked-transfer?)
         ::length   (-> req :headers content-length)}))))
