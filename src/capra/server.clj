@@ -100,9 +100,14 @@
    (ring/write-body-to-stream body response out)))
 
 (defn- ring-responder [request socket out callback options]
-  (fn [response]
-    (write-response-head socket request response options)
-    (write-response-body out response callback)))
+  (fn respond
+    ([response]
+     (write-response-head socket request response options)
+     (write-response-body out response callback))
+    ([response ensure-body-closed?]
+     (if ensure-body-closed?
+       (try (respond response) (finally (.close ^OutputStream out)))
+       (respond response)))))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
@@ -244,18 +249,12 @@
          :body (close-response state exception) 
          nil)))))
 
-(defn- ensure-body-closes [body]
-  (reify ring/StreamableResponseBody
-    (write-body-to-stream [_ response output-stream]
-      (try (ring/write-body-to-stream body response output-stream)
-           (finally (.close output-stream))))))
-
 (defn- sync->async-handler [handler]
   (fn [request respond raise]
     (let [response (try (handler request)
                         (catch Exception ex (raise ex) ::error))]
       (when (not= response ::error)
-        (respond (update response :body ensure-body-closes))))))
+        (respond response true)))))
 
 (defn- new-default-options []
   {:body-buffer-size     8192
