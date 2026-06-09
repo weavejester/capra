@@ -74,27 +74,34 @@
 (defn- content-length [{:strs [content-length]}]
   (some-> content-length Long/parseLong))
 
+(defn- write-response-head
+  [socket {:keys [protocol]} {:keys [status headers]}
+   {:keys [response-buffer-size]}]
+  (let [buffer (ByteBuffer/allocate response-buffer-size)
+        reason (reason/status->reason status)]
+    (write-ascii buffer (str protocol " " status " " reason "\r\n"))
+    (doseq [kv headers]
+       (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
+    (write-ascii buffer "\r\n")
+    (.flip buffer)
+    (tcp/write socket buffer)))
+
 (defn- lowercase-headers [headers]
   (persistent! (reduce-kv #(assoc! %1 (str/lower-case %2) %3)
                           (transient {}) headers)))
 
-(defn- ring-responder
-  [{:keys [protocol]} socket out {:keys [response-buffer-size]}]
-  (fn [{:keys [status headers body] :as response}]
-    (let [buffer (ByteBuffer/allocate response-buffer-size)
-          reason (reason/status->reason status)]
-      (write-ascii buffer (str protocol " " status " " reason "\r\n"))
-      (doseq [kv headers]
-        (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
-      (write-ascii buffer "\r\n")
-      (.flip buffer)
-      (tcp/write socket buffer)
-      (let [headers (lowercase-headers headers)]
-        (if (chunked-transfer? headers)
-          (ring/write-body-to-stream body response (chunked-output-stream out))
-          (let [length (content-length headers)
-                out    (limited-output-stream out length)]
-            (ring/write-body-to-stream body response out)))))))
+(defn- write-response-body [out {:keys [headers body] :as response}]
+ (let [headers (lowercase-headers headers)]
+   (if (chunked-transfer? headers)
+     (ring/write-body-to-stream body response (chunked-output-stream out))
+     (let [length (content-length headers)
+           out    (limited-output-stream out length)]
+       (ring/write-body-to-stream body response out)))))
+
+(defn- ring-responder [request socket out options]
+  (fn [response]
+    (write-response-head socket request response options)
+    (write-response-body out response)))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase ^String encoding "chunked")))
@@ -123,11 +130,10 @@
   (stream/stream-handler
    (fn [in out]
      (let [out     (wrap-output-stream-close out callback)
+           request (persistent! (assoc! request :body in))
            respond (ring-responder request socket out opts)
            raise   (fn [_ex])]
-       (-> (assoc! request :body in)
-           (persistent!)
-           (ring-handler respond raise))))
+       (ring-handler request respond raise)))
    opts))
 
 (defn- keepalive-socket [socket]
