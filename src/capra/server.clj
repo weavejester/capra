@@ -178,9 +178,7 @@
     {::step     :error
      ::response (transfer-encoding-error req)}
     (let [next?    (volatile! false)
-          callback #(do (vreset! next? true)
-                        (tcp/resume-reads socket)
-                        (tcp/force-read socket))
+          callback #(do (vreset! next? true) (tcp/resume-reads socket))
           handler  (ring->stream-handler ring-handler req socket callback opts)
           socket   (if (close-connection? req) socket (keepalive-socket socket))]
       (transient
@@ -242,7 +240,7 @@
 (defn- buffer-next-request [{::keys [next?]} socket ^ByteBuffer buffer]
   (if @next?
     (init-request socket)
-    (when (zero? (.capacity buffer))
+    (when (= (.limit buffer) (.capacity buffer))
       (tcp/pause-reads socket))))
 
 (defn- write-error-response [{::keys [response]} socket]
