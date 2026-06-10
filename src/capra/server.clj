@@ -12,6 +12,9 @@
            [java.util.concurrent Executors]
            [java.util.concurrent.atomic AtomicInteger]))
 
+(def ^:private ^:const server-header
+  "Server: Capra\r\n\r\n")
+
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
         local  ^InetSocketAddress (:local-address info)
@@ -92,7 +95,7 @@
       (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
     (when (and (nil? transfer-encoding) (nil? content-length))
       (write-ascii buffer "Transfer-Encoding: chunked\r\n"))
-    (write-ascii buffer "\r\n")
+    (write-ascii buffer server-header)
     (.flip buffer)
     (tcp/write socket buffer)))
 
@@ -131,7 +134,8 @@
          "Content-Type: text/plain; charset=UTF-8\r\n"
          "Content-Length: "
          (count (.getBytes body StandardCharsets/US_ASCII))
-         "\r\n\r\n" body)))
+         server-header
+         body)))
 
 (defn- ring->stream-handler [ring-handler request socket callback opts]
   (stream/stream-handler

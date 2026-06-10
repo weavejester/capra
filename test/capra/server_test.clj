@@ -11,7 +11,8 @@
 (deftest request-response-test
   (with-open [_ (capra/start-server hello-world-handler {:port 4321})]
     (is (= {:status  200
-            :headers {"Content-Type" "text/plain"
+            :headers {"Content-Type"      "text/plain"
+                      "Server"            "Capra"
                       "Transfer-Encoding" "chunked"}
             :body    "Hello World"}
            (-> (http/get "http://localhost:4321")
