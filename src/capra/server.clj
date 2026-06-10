@@ -312,4 +312,14 @@
                  :body    (str "body=" (slurp (:body request)))}))
      {:port 4000, :async? true, :reuse-address? true}))
 
+  (defn simple-handler [_request]
+    {:status  200
+     :headers {"Content-Type" "text/plain; charset=UTF-8"}
+     :body    "Hello World"})
+
+  (require '[org.httpkit.server :as hk])
+
+  (def capra-server   (start-server simple-handler {:port 6201}))
+  (def httpkit-server (hk/run-server simple-handler {:port 6202}))
+
   (.close server))

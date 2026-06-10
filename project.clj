@@ -8,4 +8,5 @@
                  [org.ring-clojure/ring-core-protocols "1.15.4"]]
   :plugins [[cider/cider-nrepl "0.59.0"]]
   :global-vars {*warn-on-reflection* true}
-  :profiles {:dev {:dependencies [[clj-http "3.13.1"]]}})
+  :profiles {:dev {:dependencies [[clj-http "3.13.1"]
+                                  [http-kit "2.8.1"]]}})
