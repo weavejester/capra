@@ -43,7 +43,7 @@
       (assoc! state
               ::step   :handler
               :headers (persistent! headers))
-      (let [[name value] (str/split line #":")]
+      (let [[name value] (str/split line #":" 2)]
         (->> (assoc! headers (str/lower-case name) (str/trim value))
              (assoc! state :headers))))))
 
