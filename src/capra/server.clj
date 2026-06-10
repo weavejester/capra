@@ -160,7 +160,7 @@
       (.equalsIgnoreCase "close" connection)))
 
 (defn- chunked-transfer? [{{:strs [transfer-encoding]} :headers}]
-  (boolean (some->> transfer-encoding (re-find #"(^|, *)chunked($|,)"))))
+  (.equalsIgnoreCase "chunked" transfer-encoding))
 
 (defn- content-length [{{:strs [content-length]} :headers}]
   (some-> content-length Long/parseLong))
