@@ -70,40 +70,49 @@
        (.close out)
        (complete)))))
 
-(defn- chunked-transfer? [{:strs [transfer-encoding]}]
-  (boolean (some->> transfer-encoding (re-find #"(^|, *)chunked($|,)"))))
-
-(defn- content-length [{:strs [content-length]}]
-  (some-> content-length Long/parseLong))
+(defn- response-info [{:keys [headers]}]
+  (reduce-kv (fn [m k v]
+               (cond
+                 (.equalsIgnoreCase "transfer-encoding" k)
+                 (assoc m :transfer-encoding (str/lower-case v))
+                 (.equalsIgnoreCase "content-length" k)
+                 (assoc m :content-length (Long/parseLong v))
+                 :else m))
+             {} headers))
 
 (defn- write-response-head
-  [socket {:keys [protocol]} {:keys [status headers]}
+  [socket
+   {:keys [protocol]} {:keys [transfer-encoding content-length]}
+   {:keys [status headers]}
    {:keys [response-buffer-size]}]
   (let [buffer (ByteBuffer/allocate response-buffer-size)
         reason (reason/status->reason status)]
     (write-ascii buffer (str protocol " " status " " reason "\r\n"))
     (doseq [kv headers]
       (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
+    (when (and (nil? transfer-encoding) (nil? content-length))
+      (write-ascii buffer "Transfer-Encoding: chunked\r\n"))
     (write-ascii buffer "\r\n")
     (.flip buffer)
     (tcp/write socket buffer)))
 
-(defn- lowercase-headers [headers]
-  (persistent! (reduce-kv #(assoc! %1 (str/lower-case %2) %3)
-                          (transient {}) headers)))
-
-(defn- write-response-body [out {:keys [headers body] :as response} callback]
-  (let [headers (lowercase-headers headers)
-        out     (if (chunked-transfer? headers)
-                  (chunked-output-stream out callback)
-                  (limited-output-stream out (content-length headers) callback))]
+(defn- write-response-body
+  [out
+   {:keys [transfer-encoding content-length]}
+   {:keys [body] :as response}
+   callback]
+  (let [out (if (or (= transfer-encoding "chunked")
+                    (and (nil? transfer-encoding) (nil? content-length)))
+              (chunked-output-stream out callback)
+              (limited-output-stream out content-length callback))]
     (ring/write-body-to-stream body response out)))
 
 (defn- ring-responder [request socket out callback options]
   (fn respond
     ([response]
-     (write-response-head socket request response options)
-     (write-response-body out response callback))
+     (let [info (response-info response)]
+       (write-response-head socket request info response options)
+       (write-response-body out info response callback)))
     ([response ensure-body-closed?]
      (if ensure-body-closed?
        (try (respond response) (finally (.close ^OutputStream out)))
@@ -146,6 +155,12 @@
   (or (and (nil? connection) (= protocol "HTTP/1.0"))
       (.equalsIgnoreCase "close" connection)))
 
+(defn- chunked-transfer? [{{:strs [transfer-encoding]} :headers}]
+  (boolean (some->> transfer-encoding (re-find #"(^|, *)chunked($|,)"))))
+
+(defn- content-length [{{:strs [content-length]} :headers}]
+  (some-> content-length Long/parseLong))
+
 (defn- run-ring-handler [ring-handler req socket opts]
   (if (not (valid-transfer-encoding? req))
     {::step     :error
@@ -161,8 +176,8 @@
         ::handler  handler
         ::state    (handler socket)
         ::next?    next?
-        ::chunked? (-> req :headers chunked-transfer?)
-        ::length   (-> req :headers content-length)}))))
+        ::chunked? (chunked-transfer? req)
+        ::length   (content-length req)}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]

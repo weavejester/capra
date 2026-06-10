@@ -5,8 +5,7 @@
 
 (defn- hello-world-handler [_request]
   {:status  200
-   :headers {"Content-Type" "text/plain"
-             "Transfer-Encoding" "chunked"}
+   :headers {"Content-Type" "text/plain"}
    :body    "Hello World"})
 
 (deftest request-response-test
