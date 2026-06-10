@@ -5,7 +5,7 @@
             [teensyp.buffer :as buf]
             [teensyp.server :as tcp]
             [teensyp.stream :as stream])
-  (:import [java.io OutputStream]
+  (:import [java.io Closeable OutputStream]
            [java.net InetSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.charset StandardCharsets]
@@ -213,11 +213,12 @@
 
 (defn- limit-buffer-to-length ^ByteBuffer [^ByteBuffer buffer length]
   (if (< length (.remaining buffer))
-    (doto (.duplicate buffer) (.limit (+ (.position buffer) length)))
+    (doto (.duplicate buffer)
+      (.limit (+ (.position buffer) ^long length)))
     buffer))
 
 (defn- read-known-length-body-stream
-  [{::keys [handler length state] :as st} socket ^ByteBuffer buffer]
+  [{::keys [handler ^long length state] :as st} socket ^ByteBuffer buffer]
   (if (pos? length)
     (when (.hasRemaining buffer)
       (let [capped-buffer (limit-buffer-to-length buffer length)
@@ -288,7 +289,7 @@
    :response-buffer-size 32768
    :handler-executor     (Executors/newFixedThreadPool 16)})
 
-(defn start-server [handler options]
+(defn start-server ^Closeable [handler options]
   (let [handler-opts (merge (new-default-options) options)
         handler      (if (:async? handler-opts)
                        handler
