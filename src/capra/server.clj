@@ -9,6 +9,8 @@
            [java.net InetSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.charset StandardCharsets]
+           [java.time ZoneOffset ZonedDateTime]
+           [java.time.format DateTimeFormatter]
            [java.util.concurrent Executors]
            [java.util.concurrent.atomic AtomicInteger]))
 
@@ -83,6 +85,10 @@
                  :else m))
              {} headers))
 
+(defn- date-header []
+  (str "Date: " (.format (ZonedDateTime/now ZoneOffset/UTC)
+                         DateTimeFormatter/RFC_1123_DATE_TIME) "\r\n"))
+
 (defn- write-response-head
   [socket
    {:keys [protocol]} {:keys [transfer-encoding content-length]}
@@ -91,6 +97,7 @@
   (let [buffer (ByteBuffer/allocate response-buffer-size)
         reason (reason/status->reason status)]
     (write-ascii buffer (str protocol " " status " " reason "\r\n"))
+    (write-ascii buffer (date-header))
     (doseq [kv headers]
       (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
     (when (and (nil? transfer-encoding) (nil? content-length))
@@ -130,6 +137,7 @@
                   transfer-encoding "\".\n"
                   "Only \"chunked\" transfer encoding supported.")]
     (str protocol " 501 Not Implemented\r\n"
+         (date-header)
          "Connection: close\r\n"
          "Content-Type: text/plain; charset=UTF-8\r\n"
          "Content-Length: "
