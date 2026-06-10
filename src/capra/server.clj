@@ -249,6 +249,12 @@
     (tcp/close socket)
     nil))
 
+(let [lock (Object.)]
+  (defn- print-ex [ex]
+    (locking lock
+      (binding [*out* *err*]
+        (prn :exception ex)))))
+
 (defn- http-handler
   [handler {:keys [handler-executor body-buffer-size response-buffer-size]}]
   (let [opts {:executor             handler-executor
@@ -270,7 +276,7 @@
          (recur state socket buffer)
          state))
       ([{::keys [step] :as state} exception]
-       (when exception (prn :exception exception))
+       (when exception (print-ex exception))
        (case step
          :body (close-response state exception)
          nil)))))
@@ -299,6 +305,10 @@
 
 (comment
   server
+
+  (def s "Host:")
+  (int \:)
+  (.indexOf s 58)
 
   (def server
     (start-server
