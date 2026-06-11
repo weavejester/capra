@@ -39,12 +39,14 @@
 
 (defn- parse-header [{:keys [headers] :as state} buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
-    (if (str/blank? line)
+    (if (= line "")
       (assoc! state
               ::step   :handler
               :headers (persistent! headers))
-      (let [[name value] (str/split line #":" 2)]
-        (->> (assoc! headers (str/lower-case name) (str/trim value))
+      (let [colon-index (str/index-of line \:)]
+        (->> (assoc! headers
+                     (str/lower-case (subs line 0 colon-index))
+                     (str/trim       (subs line (inc colon-index))))
              (assoc! state :headers))))))
 
 (defn- write-ascii [^ByteBuffer buffer ^String s]
@@ -309,6 +311,7 @@
   (def s "Host:")
   (int \:)
   (.indexOf s 58)
+  (.substring s 5)
 
   (def server
     (start-server
@@ -322,7 +325,8 @@
 
   (defn simple-handler [_request]
     {:status  200
-     :headers {"Content-Type" "text/plain; charset=UTF-8"}
+     :headers {"Content-Type" "text/plain; charset=UTF-8"
+               "Content-Length" "11"}
      :body    "Hello World"})
 
   (require '[org.httpkit.server :as hk])
@@ -330,4 +334,4 @@
   (def capra-server   (start-server simple-handler {:port 6201}))
   (def httpkit-server (hk/run-server simple-handler {:port 6202}))
 
-  (.close server))
+  (.close capra-server))
