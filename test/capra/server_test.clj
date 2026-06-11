@@ -39,3 +39,23 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest request-with-content-length-test
+  (with-open [_ (capra/start-server
+                 (fn handler [{:keys [headers body]}]
+                   {:status  200
+                    :headers {"Content-Type"   (headers "content-type")
+                              "Content-Length" (headers "content-length")}
+                    :body    (slurp body)})
+                 {:port 4323})]
+    (let [response (http/get "http://localhost:4323"
+                             {:headers {"Content-Type" "text/plain"}
+                              :body "Hello World"})]
+      (is (= {:status  200
+              :headers {"Content-Type"   "text/plain"
+                        "Content-Length" "11"
+                        "Server"         "Capra"}
+              :body    "Hello World"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))
