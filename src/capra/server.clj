@@ -147,7 +147,7 @@
 (defn- ring->stream-handler [ring-handler request socket opts]
   (stream/stream-handler
    (fn [in out]
-     (let [request (persistent! (assoc! request :body in))
+     (let [request (assoc request :body in)
            respond (ring-responder request socket out opts)
            raise   (fn [_ex])]
        (ring-handler request respond raise)))
@@ -172,12 +172,13 @@
 (defn- content-length [{{:strs [content-length]} :headers}]
   (some-> content-length Long/parseLong))
 
-(defn- run-ring-handler [ring-handler req socket opts]
-  (if (not (valid-transfer-encoding? req))
+(defn- run-ring-handler [ring-handler request socket opts]
+  (if (not (valid-transfer-encoding? request))
     {::step     :error
-     ::response (transfer-encoding-error req)}
-    (let [handler  (ring->stream-handler ring-handler req socket opts)
-          socket   (if (close-connection? req) socket (keepalive-socket socket))]
+     ::response (transfer-encoding-error request)}
+    (let [req     (persistent! request)
+          handler (ring->stream-handler ring-handler req socket opts)
+          socket  (if (close-connection? req) socket (keepalive-socket socket))]
       (transient
        {::step     :body
         ::handler  handler
