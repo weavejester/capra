@@ -240,11 +240,8 @@
     (tcp/close socket)
     nil))
 
-(let [lock (Object.)]
-  (defn- print-ex [ex]
-    (locking lock
-      (binding [*out* *err*]
-        (prn :exception ex)))))
+(defn- print-ex [ex]
+  (locking *err* (binding [*out* *err*]) (prn ex)))
 
 (defn- http-handler
   [handler {:keys [handler-executor body-buffer-size response-buffer-size]}]
