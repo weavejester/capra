@@ -89,13 +89,22 @@
   (str "Date: " (.format (ZonedDateTime/now ZoneOffset/UTC)
                          DateTimeFormatter/RFC_1123_DATE_TIME) "\r\n"))
 
+(defn- get-cached [^ThreadLocal thread-local f]
+  (or (.get thread-local)
+      (let [v (f)]
+        (.set thread-local v)
+        v)))
+
+(def ^:private response-buffer (ThreadLocal.))
+
 (defn- write-response-head
   [socket
    {:keys [protocol]} {:keys [transfer-encoding content-length]}
    {:keys [status headers]}
-   {:keys [response-buffer-size]}]
-  (let [buffer (ByteBuffer/allocate response-buffer-size)
+   {buf-size :response-buffer-size}]
+  (let [buffer (get-cached response-buffer #(ByteBuffer/allocate buf-size))
         reason (reason/status->reason status)]
+    (.clear ^ByteBuffer buffer)
     (write-ascii buffer (str protocol " " status " " reason "\r\n"))
     (write-ascii buffer (date-header))
     (doseq [kv headers]
@@ -103,7 +112,7 @@
     (when (and (nil? transfer-encoding) (nil? content-length))
       (write-ascii buffer "Transfer-Encoding: chunked\r\n"))
     (write-ascii buffer server-header)
-    (.flip buffer)
+    (.flip ^ByteBuffer buffer)
     (tcp/write socket buffer)))
 
 (defn- write-response-body
