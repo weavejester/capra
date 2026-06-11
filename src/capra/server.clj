@@ -54,7 +54,7 @@
 
 (let [crlf (.getBytes "\r\n" StandardCharsets/US_ASCII)
       eof  (.getBytes "0\r\n\r\n")]
-  (defn- chunked-output-stream ^OutputStream [^OutputStream out complete]
+  (defn- chunked-output-stream ^OutputStream [^OutputStream out]
     (stream/output-stream
      (fn write-chunk [^bytes b off len]
        (let [header (format "%X\r\n" len)]
@@ -63,10 +63,9 @@
          (.write out crlf)))
      (fn close-stream []
        (.write out eof)
-       (.close out)
-       (complete)))))
+       (.close out)))))
 
-(defn- limited-output-stream ^OutputStream [^OutputStream out limit complete]
+(defn- limited-output-stream ^OutputStream [^OutputStream out limit]
   (let [limit (AtomicInteger. limit)]
     (stream/output-stream
      (fn write [^bytes b off len]
@@ -74,8 +73,7 @@
          (when (pos? len)
            (.write out b off len))))
      (fn close []
-       (.close out)
-       (complete)))))
+       (.close out)))))
 
 (defn- response-info [{:keys [headers]}]
   (reduce-kv (fn [m k v]
@@ -111,20 +109,19 @@
 (defn- write-response-body
   [out
    {:keys [transfer-encoding content-length]}
-   {:keys [body] :as response}
-   callback]
+   {:keys [body] :as response}]
   (let [out (if (or (= transfer-encoding "chunked")
                     (and (nil? transfer-encoding) (nil? content-length)))
-              (chunked-output-stream out callback)
-              (limited-output-stream out content-length callback))]
+              (chunked-output-stream out)
+              (limited-output-stream out content-length))]
     (ring/write-body-to-stream body response out)))
 
-(defn- ring-responder [request socket out callback options]
+(defn- ring-responder [request socket out options]
   (fn respond
     ([response]
      (let [info (response-info response)]
        (write-response-head socket request info response options)
-       (write-response-body out info response callback)))
+       (write-response-body out info response)))
     ([response ensure-body-closed?]
      (if ensure-body-closed?
        (try (respond response) (finally (.close ^OutputStream out)))
@@ -147,11 +144,11 @@
          server-header
          body)))
 
-(defn- ring->stream-handler [ring-handler request socket callback opts]
+(defn- ring->stream-handler [ring-handler request socket opts]
   (stream/stream-handler
    (fn [in out]
      (let [request (persistent! (assoc! request :body in))
-           respond (ring-responder request socket out callback opts)
+           respond (ring-responder request socket out opts)
            raise   (fn [_ex])]
        (ring-handler request respond raise)))
    opts))
@@ -179,15 +176,12 @@
   (if (not (valid-transfer-encoding? req))
     {::step     :error
      ::response (transfer-encoding-error req)}
-    (let [next?    (volatile! false)
-          callback #(do (vreset! next? true) (tcp/resume-reads socket))
-          handler  (ring->stream-handler ring-handler req socket callback opts)
+    (let [handler  (ring->stream-handler ring-handler req socket opts)
           socket   (if (close-connection? req) socket (keepalive-socket socket))]
       (transient
        {::step     :body
         ::handler  handler
         ::state    (handler socket)
-        ::next?    next?
         ::chunked? (chunked-transfer? req)
         ::length   (content-length req)}))))
 
@@ -200,9 +194,9 @@
           (.position buffer (+ start length 2))
           (doto chunked-buffer (.limit (+ start length))))))))
 
-(defn- next-request [{::keys [handler state next?]} socket]
+(defn- next-request [{::keys [handler state]} socket]
   (handler state socket nil)
-  {::step :buffer ::next? next?})
+  (init-request socket))
 
 (defn- read-chunked-body-stream
   [{::keys [handler state] :as st} socket buffer]
@@ -239,12 +233,6 @@
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
 
-(defn- buffer-next-request [{::keys [next?]} socket ^ByteBuffer buffer]
-  (if @next?
-    (init-request socket)
-    (when (= (.limit buffer) (.capacity buffer))
-      (tcp/pause-reads socket))))
-
 (defn- write-error-response [{::keys [response]} socket]
   (let [response-bytes (.getBytes ^String response StandardCharsets/US_ASCII)]
     (tcp/write socket (ByteBuffer/wrap response-bytes))
@@ -272,7 +260,6 @@
                    :headers    (parse-header state buffer)
                    :handler    (run-ring-handler handler state socket opts)
                    :body       (read-body-stream state socket buffer)
-                   :buffer     (buffer-next-request state socket buffer)
                    :error      (write-error-response state socket)
                    nil)]
          (recur state socket buffer)
