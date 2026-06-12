@@ -14,8 +14,7 @@
            [java.util.concurrent Executors]
            [java.util.concurrent.atomic AtomicInteger]))
 
-(def ^:private ^:const server-header
-  "Server: Capra\r\n\r\n")
+(def ^:private ^:const server-header "Server: Capra\r\n")
 
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
@@ -75,62 +74,65 @@
      (fn close []
        (.close out)))))
 
-(defn- response-info [{:keys [headers]}]
-  (reduce-kv (fn [m k v]
-               (cond
-                 (.equalsIgnoreCase "transfer-encoding" k)
-                 (assoc m :transfer-encoding (str/lower-case v))
-                 (.equalsIgnoreCase "content-length" k)
-                 (assoc m :content-length (Long/parseLong v))
-                 :else m))
-             {} headers))
+(defn- content-length [{:strs [content-length]}]
+  (some-> content-length Long/parseLong))
+
+(defn- chunked-response? [{:strs [transfer-encoding content-length]}]
+  (or (.equalsIgnoreCase "chunked" transfer-encoding)
+      (and (nil? transfer-encoding) (nil? content-length))))
+
+(defprotocol ResponseBody
+  (write-body-to-buffer [body response headers buffer])
+  (write-body-to-stream [body response headers out-stream]))
+
+(extend-protocol ResponseBody
+  Object
+  (write-body-to-buffer [_body _response headers buffer]
+    (if (and (nil? (headers "transfer-encoding"))
+             (nil? (headers "content-length")))
+      (write-ascii buffer "Transfer-Encoding: chunked\r\n\r\n")
+      (write-ascii buffer "\r\n")))
+  (write-body-to-stream [body response headers out-stream]
+    (let [out (if (chunked-response? headers)
+                (chunked-output-stream out-stream)
+                (limited-output-stream out-stream (content-length headers)))]
+      (ring/write-body-to-stream body response out))))
 
 (defn- date-header []
   (str "Date: " (.format (ZonedDateTime/now ZoneOffset/UTC)
                          DateTimeFormatter/RFC_1123_DATE_TIME) "\r\n"))
 
+(defn- write-response-head
+  [buffer {:keys [protocol]} {:keys [status headers]}]
+  (let [reason (reason/status->reason status)]
+    (write-ascii buffer (str protocol " " status " " reason "\r\n"))
+    (write-ascii buffer (date-header))
+    (write-ascii buffer server-header)
+    (doseq [kv headers]
+      (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))))
+
 (defn- get-cached [^ThreadLocal thread-local f]
   (or (.get thread-local)
-      (let [v (f)]
-        (.set thread-local v)
-        v)))
+      (let [v (f)] (.set thread-local v) v)))
 
 (def ^:private response-buffer (ThreadLocal.))
 
-(defn- write-response-head
-  [socket
-   {:keys [protocol]} {:keys [transfer-encoding content-length]}
-   {:keys [status headers]}
-   {buf-size :response-buffer-size}]
-  (let [buffer (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-        reason (reason/status->reason status)]
-    (.clear ^ByteBuffer buffer)
-    (write-ascii buffer (str protocol " " status " " reason "\r\n"))
-    (write-ascii buffer (date-header))
-    (doseq [kv headers]
-      (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))
-    (when (and (nil? transfer-encoding) (nil? content-length))
-      (write-ascii buffer "Transfer-Encoding: chunked\r\n"))
-    (write-ascii buffer server-header)
-    (.flip ^ByteBuffer buffer)
-    (tcp/write socket buffer)))
+(defn- lowercase-headers [headers]
+  (persistent! (reduce-kv (fn [m k v] (assoc! m (str/lower-case k) v))
+                          (transient {}) headers)))
 
-(defn- write-response-body
-  [out
-   {:keys [transfer-encoding content-length]}
-   {:keys [body] :as response}]
-  (let [out (if (or (= transfer-encoding "chunked")
-                    (and (nil? transfer-encoding) (nil? content-length)))
-              (chunked-output-stream out)
-              (limited-output-stream out content-length))]
-    (ring/write-body-to-stream body response out)))
-
-(defn- ring-responder [request socket out options]
+(defn- ring-responder
+  [request socket out {buf-size :response-buffer-size}]
   (fn respond
-    ([response]
-     (let [info (response-info response)]
-       (write-response-head socket request info response options)
-       (write-response-body out info response)))
+    ([{:keys [headers body] :as response}]
+     (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
+           headers (lowercase-headers headers)]
+       (.clear ^ByteBuffer buffer)
+       (write-response-head buffer request response)
+       (write-body-to-buffer body response headers buffer)
+       (.flip ^ByteBuffer buffer)
+       (tcp/write socket buffer)
+       (write-body-to-stream body response headers out)))
     ([response ensure-body-closed?]
      (if ensure-body-closed?
        (try (respond response) (finally (.close ^OutputStream out)))
@@ -178,9 +180,6 @@
 (defn- chunked-transfer? [{{:strs [transfer-encoding]} :headers}]
   (.equalsIgnoreCase "chunked" transfer-encoding))
 
-(defn- content-length [{{:strs [content-length]} :headers}]
-  (some-> content-length Long/parseLong))
-
 (defn- run-ring-handler [ring-handler request socket opts]
   (if (not (valid-transfer-encoding? request))
     {::step     :error
@@ -193,7 +192,7 @@
         ::handler  handler
         ::state    (handler socket)
         ::chunked? (chunked-transfer? req)
-        ::length   (content-length req)}))))
+        ::length   (content-length (:headers req))}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
