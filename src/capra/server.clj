@@ -157,22 +157,22 @@
   (persistent! (reduce-kv (fn [m k v] (assoc! m (str/lower-case k) v))
                           (transient {}) headers)))
 
-(defn- ring-responder
-  [request socket out {buf-size :response-buffer-size}]
-  (fn respond
-    ([{:keys [headers body] :as response}]
-     (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-           headers (lowercase-headers headers)]
-       (.clear ^ByteBuffer buffer)
-       (write-response-head buffer request response)
-       (write-body-to-buffer body response headers buffer)
-       (.flip ^ByteBuffer buffer)
-       (tcp/write socket buffer)
-       (write-body-to-stream body response headers out)))
-    ([response ensure-body-closed?]
-     (if ensure-body-closed?
-       (try (respond response) (finally (.close ^OutputStream out)))
-       (respond response)))))
+(defn- ring-responder [request socket {buf-size :response-buffer-size}]
+  (let [out (stream/socket->output-stream socket)]
+    (fn respond
+      ([{:keys [headers body] :as response}]
+       (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
+             headers (lowercase-headers headers)]
+         (.clear ^ByteBuffer buffer)
+         (write-response-head buffer request response)
+         (write-body-to-buffer body response headers buffer)
+         (.flip ^ByteBuffer buffer)
+         (tcp/write socket buffer)
+         (write-body-to-stream body response headers out)))
+      ([response ensure-body-closed?]
+       (if ensure-body-closed?
+         (try (respond response) (finally (.close ^OutputStream out)))
+         (respond response))))))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
@@ -191,11 +191,11 @@
          server-header
          body)))
 
-(defn- ring->stream-handler [ring-handler request socket opts]
-  (stream/stream-handler
-   (fn [in out]
+(defn- ring->stream-handler [ring-handler request opts]
+  (stream/input-stream-handler
+   (fn [in socket]
      (let [request (assoc request :body in)
-           respond (ring-responder request socket out opts)
+           respond (ring-responder request socket opts)
            raise   (fn [_ex])]
        (ring-handler request respond raise)))
    opts))
@@ -218,7 +218,7 @@
     {::step     :error
      ::response (transfer-encoding-error request)}
     (let [req     (persistent! request)
-          handler (ring->stream-handler ring-handler req socket opts)
+          handler (ring->stream-handler ring-handler req opts)
           socket  (if (close-connection? req) socket (keepalive-socket socket))]
       (transient
        {::step     :body
@@ -237,7 +237,7 @@
           (doto chunked-buffer (.limit (+ start length))))))))
 
 (defn- next-request [{::keys [handler state]} socket]
-  (handler state socket nil)
+  (handler state nil)
   (init-request socket))
 
 (defn- read-chunked-body-stream
