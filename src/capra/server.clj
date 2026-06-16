@@ -5,7 +5,7 @@
             [teensyp.buffer :as buf]
             [teensyp.server :as tcp]
             [teensyp.stream :as stream])
-  (:import [java.io Closeable OutputStream]
+  (:import [java.io Closeable InputStream OutputStream]
            [java.net InetSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.charset StandardCharsets]
@@ -213,19 +213,38 @@
   (or (and (nil? connection) (= protocol "HTTP/1.0"))
       (.equalsIgnoreCase "close" connection)))
 
+(defn- run-streaming-handler [ring-handler request socket opts]
+  (let [req     (persistent! request)
+        handler (ring->stream-handler ring-handler req opts)]
+    (transient
+     {::step     :body
+      ::handler  handler
+      ::state    (handler socket)
+      ::chunked? (chunked-transfer? (:headers req))
+      ::length   (content-length (:headers req))})))
+
+(defn- run-simple-handler [ring-handler request socket opts]
+  (let [body    (InputStream/nullInputStream)
+        request (persistent! (assoc! request :body body))
+        respond (ring-responder request socket opts)
+        raise   (fn [_ex])]
+    (ring-handler request respond raise)
+    (init-request socket)))
+
+(defn- empty-request-body? [{:keys [headers]}]
+  (and (not (contains? headers "content-length"))
+       (not (contains? headers "transfer-encoding"))))
+
 (defn- run-ring-handler [ring-handler request socket opts]
   (if (not (valid-transfer-encoding? request))
     {::step     :error
      ::response (transfer-encoding-error request)}
-    (let [req     (persistent! request)
-          handler (ring->stream-handler ring-handler req opts)
-          socket  (if (close-connection? req) socket (keepalive-socket socket))]
-      (transient
-       {::step     :body
-        ::handler  handler
-        ::state    (handler socket)
-        ::chunked? (chunked-transfer? (:headers req))
-        ::length   (content-length (:headers req))}))))
+    (let [socket (if (close-connection? request)
+                   socket
+                   (keepalive-socket socket))]
+      (if (empty-request-body? request)
+        (run-simple-handler ring-handler request socket opts)
+        (run-streaming-handler ring-handler request socket opts)))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
@@ -352,7 +371,6 @@
   (defn simple-handler [_request]
     {:status  200
      :headers {"Content-Type" "text/plain; charset=UTF-8"}
-               ;"Content-Length" "11"}
      :body    "Hello World"})
 
   (require '[org.httpkit.server :as hk])
