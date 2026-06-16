@@ -51,18 +51,22 @@
 (defn- write-ascii [^ByteBuffer buffer ^String s]
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
 
-(let [crlf (.getBytes "\r\n" StandardCharsets/US_ASCII)
-      eof  (.getBytes "0\r\n\r\n")]
-  (defn- chunked-output-stream ^OutputStream [^OutputStream out]
-    (stream/output-stream
-     (fn write-chunk [^bytes b off len]
-       (let [header (format "%X\r\n" len)]
-         (.write out (.getBytes header StandardCharsets/US_ASCII))
-         (.write out b off len)
-         (.write out crlf)))
-     (fn close-stream []
-       (.write out eof)
-       (.close out)))))
+(let [crlf (.getBytes "\r\n" StandardCharsets/US_ASCII)]
+  (defn- write-chunk [writef ^bytes b off len]
+    (let [header (.getBytes (format "%X\r\n" len) StandardCharsets/US_ASCII)]
+      (writef header 0 (alength header))
+      (writef b off len)
+      (writef crlf 0 2))))
+
+(def ^:private empty-chunk (.getBytes "0\r\n\r\n"))
+
+(defn- chunked-output-stream ^OutputStream [^OutputStream out]
+  (stream/output-stream
+   (fn write [b off len]
+     (write-chunk #(.write out ^bytes %1 %2 %3) b off len))
+   (fn close []
+     (.write out ^bytes empty-chunk)
+     (.close out))))
 
 (defn- limited-output-stream ^OutputStream [^OutputStream out limit]
   (let [limit (AtomicInteger. limit)]
@@ -77,15 +81,47 @@
 (defn- content-length [{:strs [content-length]}]
   (some-> content-length Long/parseLong))
 
+(defn- chunked-transfer? [{:strs [transfer-encoding]}]
+  (.equalsIgnoreCase "chunked" transfer-encoding))
+
 (defn- chunked-response? [{:strs [transfer-encoding content-length]}]
   (or (.equalsIgnoreCase "chunked" transfer-encoding)
       (and (nil? transfer-encoding) (nil? content-length))))
+
+(def ^:private re-charset
+  #"(?x);(?:.*\s)?(?i:charset)=(?:
+      ([!\#$%&'*\-+.0-9A-Z\^_`a-z\|~]+)|  # token
+      \"((?:\\\"|[^\"])*)\"               # quoted
+    )\s*(?:;|$)")
+
+(defn- content-charset [{:strs [content-type]}]
+  (when-let [m (re-find re-charset content-type)]
+    (or (m 1) (m 2))))
 
 (defprotocol ResponseBody
   (write-body-to-buffer [body response headers buffer])
   (write-body-to-stream [body response headers out-stream]))
 
 (extend-protocol ResponseBody
+  String
+  (write-body-to-buffer [body _response headers ^ByteBuffer buffer]
+    (let [^String charset (content-charset headers)
+          bs (.getBytes body (or charset "UTF-8"))]
+      (cond
+        (headers "content-length")
+        (do (write-ascii buffer "\r\n")
+            (.put buffer bs 0 (content-length headers)))
+        (chunked-transfer? headers)
+        (do (write-ascii buffer "\r\n")
+            (write-chunk #(.put buffer ^bytes %1 %2 %3) bs 0 (alength bs))
+            (.put buffer ^bytes empty-chunk))
+        :else
+        (do (write-ascii buffer (str "Content-Length: " (alength bs)))
+            (write-ascii buffer "\r\n\r\n")
+            (.put buffer bs)))))
+  (write-body-to-stream [_body _response _headers ^OutputStream out-stream]
+    (.close out-stream))
+
   Object
   (write-body-to-buffer [_body _response headers buffer]
     (if (and (nil? (headers "transfer-encoding"))
@@ -177,9 +213,6 @@
   (or (and (nil? connection) (= protocol "HTTP/1.0"))
       (.equalsIgnoreCase "close" connection)))
 
-(defn- chunked-transfer? [{{:strs [transfer-encoding]} :headers}]
-  (.equalsIgnoreCase "chunked" transfer-encoding))
-
 (defn- run-ring-handler [ring-handler request socket opts]
   (if (not (valid-transfer-encoding? request))
     {::step     :error
@@ -191,7 +224,7 @@
        {::step     :body
         ::handler  handler
         ::state    (handler socket)
-        ::chunked? (chunked-transfer? req)
+        ::chunked? (chunked-transfer? (:headers req))
         ::length   (content-length (:headers req))}))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
@@ -318,13 +351,13 @@
 
   (defn simple-handler [_request]
     {:status  200
-     :headers {"Content-Type" "text/plain; charset=UTF-8"
-               "Content-Length" "11"}
+     :headers {"Content-Type" "text/plain; charset=UTF-8"}
+               ;"Content-Length" "11"}
      :body    "Hello World"})
 
   (require '[org.httpkit.server :as hk])
 
-  (def capra-server   (start-server simple-handler {:port 6201}))
+  (def capra-server   (start-server #'simple-handler {:port 6201}))
   (def httpkit-server (hk/run-server simple-handler {:port 6202}))
 
   (.close capra-server))

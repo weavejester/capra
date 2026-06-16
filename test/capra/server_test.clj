@@ -7,14 +7,14 @@
   (with-open [_ (capra/start-server
                  (fn handler [_request]
                    {:status  200
-                    :headers {"Content-Type" "text/plain"}
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
                     :body    "Hello World"})
                  {:port 4321})]
     (let [response (http/get "http://localhost:4321")]
       (is (= {:status  200
-              :headers {"Content-Type"      "text/plain"
-                        "Server"            "Capra"
-                        "Transfer-Encoding" "chunked"}
+              :headers {"Content-Type"      "text/plain; charset=UTF-8"
+                        "Content-Length"    "11"
+                        "Server"            "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
