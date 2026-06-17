@@ -17,9 +17,11 @@
 (defn- ascii-bytes ^bytes [^String s]
   (.getBytes s StandardCharsets/US_ASCII))
 
-(def ^:private empty-chunk   (ascii-bytes "0\r\n\r\n"))
-(def ^:private server-header (ascii-bytes "Server: Capra\r\n"))
-(def ^:private crlf          (ascii-bytes "\r\n"))
+(def ^:private empty-chunk    (ascii-bytes "0\r\n\r\n"))
+(def ^:private server-header  (ascii-bytes "Server: Capra\r\n"))
+(def ^:private chunked-header (ascii-bytes "Transfer-Encoding: chunked\r\n"))
+(def ^:private length-header  (ascii-bytes "Content-Length: "))
+(def ^:private crlf           (ascii-bytes "\r\n"))
 
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
@@ -122,7 +124,8 @@
            (write-chunk #(.put buffer ^bytes %1 %2 %3) body 0 (alength body))
            (.put buffer ^bytes empty-chunk))
        :else
-       (do (write-ascii buffer (str "Content-Length: " (alength body)))
+       (do (.put buffer ^bytes length-header)
+           (write-ascii buffer (str (alength body)))
            (write-crlf buffer)
            (write-crlf buffer)
            (.put buffer body))))
@@ -140,11 +143,11 @@
     (.close out-stream))
 
   Object
-  (write-body-to-buffer [_body _response headers buffer]
-    (if (and (nil? (headers "transfer-encoding"))
-             (nil? (headers "content-length")))
-      (write-ascii buffer "Transfer-Encoding: chunked\r\n\r\n")
-      (write-crlf buffer)))
+  (write-body-to-buffer [_body _response headers ^ByteBuffer buffer]
+    (when (and (nil? (headers "transfer-encoding"))
+               (nil? (headers "content-length")))
+      (.put buffer ^bytes chunked-header))
+    (write-crlf buffer))
   (write-body-to-stream [body response headers out-stream]
     (let [out (if (chunked-response? headers)
                 (chunked-output-stream out-stream)
