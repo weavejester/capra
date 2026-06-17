@@ -57,6 +57,10 @@
 (defn- write-ascii [^ByteBuffer buffer ^String s]
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
 
+(defn- write-crlf [^ByteBuffer buffer]
+  (.put buffer (byte \return))
+  (.put buffer (byte \newline)))
+
 (defn- write-chunk [writef ^bytes b off len]
   (let [header (ascii-bytes (format "%X\r\n" len))]
     (writef header 0 (alength header))
@@ -112,15 +116,16 @@
           bs (.getBytes body (or charset "UTF-8"))]
       (cond
         (headers "content-length")
-        (do (write-ascii buffer "\r\n")
+        (do (write-crlf buffer)
             (.put buffer bs 0 (content-length headers)))
         (chunked-transfer? headers)
-        (do (write-ascii buffer "\r\n")
+        (do (write-crlf buffer)
             (write-chunk #(.put buffer ^bytes %1 %2 %3) bs 0 (alength bs))
             (.put buffer ^bytes empty-chunk))
         :else
         (do (write-ascii buffer (str "Content-Length: " (alength bs)))
-            (write-ascii buffer "\r\n\r\n")
+            (write-crlf buffer)
+            (write-crlf buffer)
             (.put buffer bs)))))
   (write-body-to-stream [_body _response _headers ^OutputStream out-stream]
     (.close out-stream))
@@ -130,7 +135,7 @@
     (if (and (nil? (headers "transfer-encoding"))
              (nil? (headers "content-length")))
       (write-ascii buffer "Transfer-Encoding: chunked\r\n\r\n")
-      (write-ascii buffer "\r\n")))
+      (write-crlf buffer)))
   (write-body-to-stream [body response headers out-stream]
     (let [out (if (chunked-response? headers)
                 (chunked-output-stream out-stream)
