@@ -109,24 +109,33 @@
   (write-body-to-buffer [body response headers buffer])
   (write-body-to-stream [body response headers out-stream]))
 
+(extend (Class/forName "[B")
+  ResponseBody
+  {:write-body-to-buffer
+   (fn [^bytes body _response headers ^ByteBuffer buffer]
+     (cond
+       (headers "content-length")
+       (do (write-crlf buffer)
+           (.put buffer body 0 (content-length headers)))
+       (chunked-transfer? headers)
+       (do (write-crlf buffer)
+           (write-chunk #(.put buffer ^bytes %1 %2 %3) body 0 (alength body))
+           (.put buffer ^bytes empty-chunk))
+       :else
+       (do (write-ascii buffer (str "Content-Length: " (alength body)))
+           (write-crlf buffer)
+           (write-crlf buffer)
+           (.put buffer body))))
+   :write-body-to-stream
+   (fn [_body _response _headers ^OutputStream out-stream]
+     (.close out-stream))})
+
 (extend-protocol ResponseBody
   String
-  (write-body-to-buffer [body _response headers ^ByteBuffer buffer]
+  (write-body-to-buffer [body response headers ^ByteBuffer buffer]
     (let [^String charset (content-charset headers)
-          bs (.getBytes body (or charset "UTF-8"))]
-      (cond
-        (headers "content-length")
-        (do (write-crlf buffer)
-            (.put buffer bs 0 (content-length headers)))
-        (chunked-transfer? headers)
-        (do (write-crlf buffer)
-            (write-chunk #(.put buffer ^bytes %1 %2 %3) bs 0 (alength bs))
-            (.put buffer ^bytes empty-chunk))
-        :else
-        (do (write-ascii buffer (str "Content-Length: " (alength bs)))
-            (write-crlf buffer)
-            (write-crlf buffer)
-            (.put buffer bs)))))
+          bs              (.getBytes body (or charset "UTF-8"))]
+      (write-body-to-buffer bs response headers buffer)))
   (write-body-to-stream [_body _response _headers ^OutputStream out-stream]
     (.close out-stream))
 

@@ -74,3 +74,20 @@
               "Server"         "Capra"
               "X-Example"      ["foo" "bar"]}
              (-> response :headers (dissoc "Date")))))))
+
+(deftest byte-array-response-body-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (.getBytes "Hello World" "UTF-8")})
+                 {:port 4321})]
+    (let [response (http/get "http://localhost:4321")]
+      (is (= {:status  200
+              :headers {"Content-Type"      "text/plain; charset=UTF-8"
+                        "Content-Length"    "11"
+                        "Server"            "Capra"}
+              :body    "Hello World"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))
