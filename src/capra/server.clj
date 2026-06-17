@@ -146,6 +146,15 @@
   (str "Date: " (.format (ZonedDateTime/now ZoneOffset/UTC)
                          DateTimeFormatter/RFC_1123_DATE_TIME) "\r\n"))
 
+(defn- write-header [^ByteBuffer buffer k v]
+  (doto buffer
+    (.put (ascii-bytes k))
+    (.put (byte \:))
+    (.put (byte \space))
+    (.put (ascii-bytes v))
+    (.put (byte \return))
+    (.put (byte \newline))))
+
 (defn- write-response-head
   [^ByteBuffer buffer {:keys [protocol]} {:keys [status headers]}]
   (let [reason (reason/status->reason status)]
@@ -155,9 +164,8 @@
     (doseq [kv headers]
       (let [value (val kv)]
         (if (vector? value)
-          (doseq [v value]
-            (write-ascii buffer (str (key kv) ": " v "\r\n")))
-          (write-ascii buffer (str (key kv) ": " value "\r\n")))))))
+          (doseq [v value] (write-header buffer (key kv) v))
+          (write-header buffer (key kv) value))))))
 
 (defn- get-cached [^ThreadLocal thread-local f]
   (or (.get thread-local)
@@ -353,11 +361,6 @@
 
 (comment
   server
-
-  (def s "Host:")
-  (int \:)
-  (.indexOf s 58)
-  (.substring s 5)
 
   (def server
     (start-server
