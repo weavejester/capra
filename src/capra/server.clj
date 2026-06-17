@@ -14,7 +14,12 @@
            [java.util.concurrent Executors]
            [java.util.concurrent.atomic AtomicInteger]))
 
-(def ^:private ^:const server-header "Server: Capra\r\n")
+(defn- ascii-bytes ^bytes [^String s]
+  (.getBytes s StandardCharsets/US_ASCII))
+
+(def ^:private empty-chunk   (ascii-bytes "0\r\n\r\n"))
+(def ^:private server-header (ascii-bytes "Server: Capra\r\n"))
+(def ^:private crlf          (ascii-bytes "\r\n"))
 
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
@@ -52,14 +57,11 @@
 (defn- write-ascii [^ByteBuffer buffer ^String s]
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
 
-(let [crlf (.getBytes "\r\n" StandardCharsets/US_ASCII)]
-  (defn- write-chunk [writef ^bytes b off len]
-    (let [header (.getBytes (format "%X\r\n" len) StandardCharsets/US_ASCII)]
-      (writef header 0 (alength header))
-      (writef b off len)
-      (writef crlf 0 2))))
-
-(def ^:private empty-chunk (.getBytes "0\r\n\r\n" StandardCharsets/US_ASCII))
+(defn- write-chunk [writef ^bytes b off len]
+  (let [header (ascii-bytes (format "%X\r\n" len))]
+    (writef header 0 (alength header))
+    (writef b off len)
+    (writef crlf 0 2)))
 
 (defn- chunked-output-stream ^OutputStream [^OutputStream out]
   (stream/output-stream
@@ -140,11 +142,11 @@
                          DateTimeFormatter/RFC_1123_DATE_TIME) "\r\n"))
 
 (defn- write-response-head
-  [buffer {:keys [protocol]} {:keys [status headers]}]
+  [^ByteBuffer buffer {:keys [protocol]} {:keys [status headers]}]
   (let [reason (reason/status->reason status)]
     (write-ascii buffer (str protocol " " status " " reason "\r\n"))
     (write-ascii buffer (date-header))
-    (write-ascii buffer server-header)
+    (.put buffer ^bytes server-header)
     (doseq [kv headers]
       (let [value (val kv)]
         (if (vector? value)
@@ -197,9 +199,8 @@
          (date-header)
          "Connection: close\r\n"
          "Content-Type: text/plain; charset=UTF-8\r\n"
-         "Content-Length: "
-         (count (.getBytes body StandardCharsets/US_ASCII))
-         server-header
+         "Content-Length: " (count (ascii-bytes body))
+         "Server: Capra"
          body)))
 
 (defn- ring->stream-handler [ring-handler request opts]
@@ -290,7 +291,7 @@
   (handler state exception))
 
 (defn- write-error-response [{::keys [response]} socket]
-  (let [response-bytes (.getBytes ^String response StandardCharsets/US_ASCII)]
+  (let [response-bytes (ascii-bytes response)]
     (tcp/write socket (ByteBuffer/wrap response-bytes))
     (tcp/close socket)
     nil))
