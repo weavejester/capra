@@ -28,12 +28,13 @@
 
 (defn- parse-start-line [state buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
-    (let [[method uri protocol] (str/split line #" ")]
+    (let [space1 (str/index-of line \space)
+          space2 (str/index-of line \space (inc space1))]
       (assoc! state
               ::step          :headers
-              :request-method (keyword (str/lower-case method))
-              :uri            uri
-              :protocol       protocol
+              :request-method (keyword (str/lower-case (subs line 0 space1)))
+              :uri            (subs line (inc space1) space2)
+              :protocol       (subs line (inc space2))
               :headers        (transient {})))))
 
 (defn- parse-header [{:keys [headers] :as state} buffer]
