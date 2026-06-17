@@ -59,7 +59,7 @@
       (writef b off len)
       (writef crlf 0 2))))
 
-(def ^:private empty-chunk (.getBytes "0\r\n\r\n"))
+(def ^:private empty-chunk (.getBytes "0\r\n\r\n" StandardCharsets/US_ASCII))
 
 (defn- chunked-output-stream ^OutputStream [^OutputStream out]
   (stream/output-stream
