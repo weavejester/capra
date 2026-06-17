@@ -157,8 +157,14 @@
   (persistent! (reduce-kv (fn [m k v] (assoc! m (str/lower-case k) v))
                           (transient {}) headers)))
 
+(defn- close-connection? [{:keys [protocol] {:strs [connection]} :headers}]
+  (or (and (nil? connection) (= protocol "HTTP/1.0"))
+      (.equalsIgnoreCase "close" connection)))
+
 (defn- ring-responder [request socket {buf-size :response-buffer-size}]
-  (let [out (stream/socket->output-stream socket)]
+  (let [out (if (close-connection? request)
+              (stream/socket->output-stream socket)
+              (stream/socket->output-stream socket {:on-close (fn [_])}))]
     (fn respond
       ([{:keys [headers body] :as response}]
        (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
@@ -200,19 +206,6 @@
        (ring-handler request respond raise)))
    opts))
 
-(defn- keepalive-socket [socket]
-  (reify tcp/Socket
-    (queue-control [_ c f] (tcp/queue-control socket c f))
-    (socket-info   [_]     (tcp/socket-info socket))
-    (queue-write [_ buffer callback]
-      (if (= buffer ::tcp/close)
-        (callback)
-        (tcp/queue-write socket buffer callback)))))
-
-(defn- close-connection? [{:keys [protocol] {:strs [connection]} :headers}]
-  (or (and (nil? connection) (= protocol "HTTP/1.0"))
-      (.equalsIgnoreCase "close" connection)))
-
 (defn- run-streaming-handler [ring-handler request socket opts]
   (let [req     (persistent! request)
         handler (ring->stream-handler ring-handler req opts)]
@@ -239,12 +232,9 @@
   (if (not (valid-transfer-encoding? request))
     {::step     :error
      ::response (transfer-encoding-error request)}
-    (let [socket (if (close-connection? request)
-                   socket
-                   (keepalive-socket socket))]
-      (if (empty-request-body? request)
-        (run-simple-handler ring-handler request socket opts)
-        (run-streaming-handler ring-handler request socket opts)))))
+    (if (empty-request-body? request)
+      (run-simple-handler ring-handler request socket opts)
+      (run-streaming-handler ring-handler request socket opts))))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
