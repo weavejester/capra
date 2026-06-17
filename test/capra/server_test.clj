@@ -59,3 +59,18 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest multiple-response-headers-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"
+                              "X-Example" ["foo" "bar"]}
+                    :body    "Hello World"})
+                 {:port 4321})]
+    (let [response (http/get "http://localhost:4321")]
+      (is (= {"Content-Type"   "text/plain; charset=UTF-8"
+              "Content-Length" "11"
+              "Server"         "Capra"
+              "X-Example"      ["foo" "bar"]}
+             (-> response :headers (dissoc "Date")))))))

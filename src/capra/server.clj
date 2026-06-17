@@ -146,7 +146,11 @@
     (write-ascii buffer (date-header))
     (write-ascii buffer server-header)
     (doseq [kv headers]
-      (write-ascii buffer (str (key kv) ": " (val kv) "\r\n")))))
+      (let [value (val kv)]
+        (if (vector? value)
+          (doseq [v value]
+            (write-ascii buffer (str (key kv) ": " v "\r\n")))
+          (write-ascii buffer (str (key kv) ": " value "\r\n")))))))
 
 (defn- get-cached [^ThreadLocal thread-local f]
   (or (.get thread-local)
