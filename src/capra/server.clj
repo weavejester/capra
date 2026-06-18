@@ -21,6 +21,7 @@
 (def ^:private server-header  (ascii-bytes "Server: Capra\r\n"))
 (def ^:private chunked-header (ascii-bytes "Transfer-Encoding: chunked\r\n"))
 (def ^:private length-header  (ascii-bytes "Content-Length: "))
+(def ^:private date-header    (ascii-bytes "Date: "))
 (def ^:private crlf           (ascii-bytes "\r\n"))
 
 (defn- init-request [socket]
@@ -161,9 +162,9 @@
            (finally
              (when-not async? (.close out)))))))
 
-(defn- date-header []
-  (str "Date: " (.format (ZonedDateTime/now ZoneOffset/UTC)
-                         DateTimeFormatter/RFC_1123_DATE_TIME) "\r\n"))
+(defn- rfc-1123-date-time []
+  (.format (ZonedDateTime/now ZoneOffset/UTC)
+           DateTimeFormatter/RFC_1123_DATE_TIME))
 
 (defn- write-status-line
   [^ByteBuffer buffer {:keys [protocol]} {:keys [status]}]
@@ -188,7 +189,9 @@
 (defn- write-response-head
   [^ByteBuffer buffer request {:keys [headers] :as response}]
   (write-status-line buffer request response)
-  (write-ascii buffer (date-header))
+  (.put buffer ^bytes date-header)
+  (write-ascii buffer (rfc-1123-date-time))
+  (write-crlf buffer)
   (.put buffer ^bytes server-header)
   (doseq [kv headers]
     (let [value (val kv)]
