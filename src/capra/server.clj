@@ -338,17 +338,18 @@
     (fn
       ([socket]
        (init-request socket))
-      ([{::keys [step] :as state} socket buffer]
-       (if-some [state
-                 (case step
-                   :start-line (parse-start-line state buffer)
-                   :headers    (parse-header state buffer)
-                   :handler    (run-ring-handler handler state socket opts)
-                   :body       (read-body-stream state socket buffer)
-                   :error      (write-error-response state socket)
-                   nil)]
-         (recur state socket buffer)
-         state))
+      ([state socket buffer]
+       (loop [state state]
+         (if-some [new-state
+                   (case (::step state)
+                     :start-line (parse-start-line state buffer)
+                     :headers    (parse-header state buffer)
+                     :handler    (run-ring-handler handler state socket opts)
+                     :body       (read-body-stream state socket buffer)
+                     :error      (write-error-response state socket)
+                     nil)]
+           (recur new-state)
+           state)))
       ([{::keys [step] :as state} exception]
        (when exception (print-ex exception))
        (case step
@@ -390,7 +391,7 @@
      :headers {"Content-Type" "text/plain; charset=UTF-8"}
      :body    "Hello World"})
 
-  (def capra-server   (start-server #'simple-handler {:port 6201}))
+  (def capra-server   (start-server simple-handler {:port 6201}))
   (def httpkit-server (hk/run-server simple-handler {:port 6202}))
 
   (.close capra-server))
