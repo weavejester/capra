@@ -112,14 +112,12 @@
       (.equalsIgnoreCase "close" connection)))
 
 (defprotocol ResponseBody
-  (body-output-stream [body request response headers socket])
-  (write-body-to-buffer [body response headers buffer]))
+  (write-body-to-socket [body request response headers buffer socket async?]))
 
 (extend (Class/forName "[B")
   ResponseBody
-  {:body-output-stream (fn [_ _ _ _ _] nil)
-   :write-body-to-buffer
-   (fn [^bytes body _response headers ^ByteBuffer buffer]
+  {:write-body-to-socket
+   (fn [^bytes body _resp _req headers ^ByteBuffer buffer socket _async?]
      (cond
        (headers "content-length")
        (do (write-crlf buffer)
@@ -133,29 +131,35 @@
            (write-ascii buffer (str (alength body)))
            (write-crlf buffer)
            (write-crlf buffer)
-           (.put buffer body))))})
+           (.put buffer body)))
+     (.flip buffer)
+     (tcp/write socket buffer))})
 
 (extend-protocol ResponseBody
   String
-  (body-output-stream [_ _ _ _ _] nil)
-  (write-body-to-buffer [body response headers buffer]
+  (write-body-to-socket [body response request headers buffer socket async?]
     (let [^String charset (content-charset headers)
-          bs              (.getBytes body (or charset "UTF-8"))]
-      (write-body-to-buffer bs response headers buffer)))
+          body-bytes      (.getBytes body (or charset "UTF-8"))]
+      (write-body-to-socket
+       body-bytes request response headers buffer socket async?)))
+
   Object
-  (body-output-stream [body request response headers socket]
+  (write-body-to-socket [body response request headers buffer socket async?]
+    (when (and (nil? (headers "transfer-encoding"))
+               (nil? (headers "content-length")))
+      (.put ^ByteBuffer buffer ^bytes chunked-header))
+    (write-crlf buffer)
+    (.flip ^ByteBuffer buffer)
+    (tcp/write socket buffer)
     (let [out (if (close-connection? request)
                 (stream/socket->output-stream socket)
                 (stream/socket->output-stream socket {:on-close (fn [_])}))
           out (if (chunked-response? headers)
                 (chunked-output-stream out)
                 (limited-output-stream out (content-length headers)))]
-      (ring/write-body-to-stream body response out)))
-  (write-body-to-buffer [_body _response headers ^ByteBuffer buffer]
-    (when (and (nil? (headers "transfer-encoding"))
-               (nil? (headers "content-length")))
-      (.put buffer ^bytes chunked-header))
-    (write-crlf buffer)))
+      (try (ring/write-body-to-stream body response out)
+           (finally
+             (when-not async? (.close out)))))))
 
 (defn- date-header []
   (str "Date: " (.format (ZonedDateTime/now ZoneOffset/UTC)
@@ -203,17 +207,13 @@
                           (transient {}) headers)))
 
 (defn- ring-responder [request socket {buf-size :response-buffer-size}]
-  (fn respond [{:keys [headers body] :as response}]
+  (fn respond [{:keys [headers body] :as response} async?]
     (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
           headers (lowercase-headers headers)]
       (.clear ^ByteBuffer buffer)
       (write-response-head buffer request response)
-      (write-body-to-buffer body response headers buffer)
-      (.flip ^ByteBuffer buffer)
-      (tcp/write socket buffer)
-      (when-some [out (body-output-stream body request response headers socket)]
-        (ring/write-body-to-stream body response out)
-        out))))
+      (write-body-to-socket
+       body request response headers buffer socket async?))))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
@@ -352,13 +352,16 @@
          :body (close-response state exception)
          nil)))))
 
-(defn- sync->async-handler [handler]
+(defn- async-handler [handler]
+  (fn [request respond raise]
+    (handler request #(respond % true) raise)))
+
+(defn- sync-handler [handler]
   (fn [request respond raise]
     (let [response (try (handler request)
                         (catch Exception ex (raise ex) ::error))]
       (when (not= response ::error)
-        (when-some [out (respond response)]
-          (.close out))))))
+        (respond response false)))))
 
 (defn- new-default-options []
   {:body-buffer-size     8192
@@ -368,8 +371,8 @@
 (defn start-server ^Closeable [handler options]
   (let [handler-opts (merge (new-default-options) options)
         handler      (if (:async? handler-opts)
-                       handler
-                       (sync->async-handler handler))]
+                       (async-handler handler)
+                       (sync-handler handler))]
     (tcp/start-server
      (-> options
          (assoc :executor (:socket-executor options))
