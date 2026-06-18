@@ -107,13 +107,18 @@
   (when-let [m (re-find re-charset content-type)]
     (or (m 1) (m 2))))
 
+(defn- close-connection? [{:keys [protocol] {:strs [connection]} :headers}]
+  (or (and (nil? connection) (= protocol "HTTP/1.0"))
+      (.equalsIgnoreCase "close" connection)))
+
 (defprotocol ResponseBody
-  (write-body-to-buffer [body response headers buffer])
-  (write-body-to-stream [body response headers out-stream]))
+  (body-output-stream [body request response headers socket])
+  (write-body-to-buffer [body response headers buffer]))
 
 (extend (Class/forName "[B")
   ResponseBody
-  {:write-body-to-buffer
+  {:body-output-stream (fn [_ _ _ _ _] nil)
+   :write-body-to-buffer
    (fn [^bytes body _response headers ^ByteBuffer buffer]
      (cond
        (headers "content-length")
@@ -128,31 +133,29 @@
            (write-ascii buffer (str (alength body)))
            (write-crlf buffer)
            (write-crlf buffer)
-           (.put buffer body))))
-   :write-body-to-stream
-   (fn [_body _response _headers ^OutputStream out-stream]
-     (.close out-stream))})
+           (.put buffer body))))})
 
 (extend-protocol ResponseBody
   String
-  (write-body-to-buffer [body response headers ^ByteBuffer buffer]
+  (body-output-stream [_ _ _ _ _] nil)
+  (write-body-to-buffer [body response headers buffer]
     (let [^String charset (content-charset headers)
           bs              (.getBytes body (or charset "UTF-8"))]
       (write-body-to-buffer bs response headers buffer)))
-  (write-body-to-stream [_body _response _headers ^OutputStream out-stream]
-    (.close out-stream))
-
   Object
+  (body-output-stream [body request response headers socket]
+    (let [out (if (close-connection? request)
+                (stream/socket->output-stream socket)
+                (stream/socket->output-stream socket {:on-close (fn [_])}))
+          out (if (chunked-response? headers)
+                (chunked-output-stream out)
+                (limited-output-stream out (content-length headers)))]
+      (ring/write-body-to-stream body response out)))
   (write-body-to-buffer [_body _response headers ^ByteBuffer buffer]
     (when (and (nil? (headers "transfer-encoding"))
                (nil? (headers "content-length")))
       (.put buffer ^bytes chunked-header))
-    (write-crlf buffer))
-  (write-body-to-stream [body response headers out-stream]
-    (let [out (if (chunked-response? headers)
-                (chunked-output-stream out-stream)
-                (limited-output-stream out-stream (content-length headers)))]
-      (ring/write-body-to-stream body response out))))
+    (write-crlf buffer)))
 
 (defn- date-header []
   (str "Date: " (.format (ZonedDateTime/now ZoneOffset/UTC)
@@ -199,28 +202,18 @@
   (persistent! (reduce-kv (fn [m k v] (assoc! m (str/lower-case k) v))
                           (transient {}) headers)))
 
-(defn- close-connection? [{:keys [protocol] {:strs [connection]} :headers}]
-  (or (and (nil? connection) (= protocol "HTTP/1.0"))
-      (.equalsIgnoreCase "close" connection)))
-
 (defn- ring-responder [request socket {buf-size :response-buffer-size}]
-  (let [out (if (close-connection? request)
-              (stream/socket->output-stream socket)
-              (stream/socket->output-stream socket {:on-close (fn [_])}))]
-    (fn respond
-      ([{:keys [headers body] :as response}]
-       (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-             headers (lowercase-headers headers)]
-         (.clear ^ByteBuffer buffer)
-         (write-response-head buffer request response)
-         (write-body-to-buffer body response headers buffer)
-         (.flip ^ByteBuffer buffer)
-         (tcp/write socket buffer)
-         (write-body-to-stream body response headers out)))
-      ([response ensure-body-closed?]
-       (if ensure-body-closed?
-         (try (respond response) (finally (.close ^OutputStream out)))
-         (respond response))))))
+  (fn respond [{:keys [headers body] :as response}]
+    (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
+          headers (lowercase-headers headers)]
+      (.clear ^ByteBuffer buffer)
+      (write-response-head buffer request response)
+      (write-body-to-buffer body response headers buffer)
+      (.flip ^ByteBuffer buffer)
+      (tcp/write socket buffer)
+      (when-some [out (body-output-stream body request response headers socket)]
+        (ring/write-body-to-stream body response out)
+        out))))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
@@ -364,7 +357,8 @@
     (let [response (try (handler request)
                         (catch Exception ex (raise ex) ::error))]
       (when (not= response ::error)
-        (respond response true)))))
+        (when-some [out (respond response)]
+          (.close out))))))
 
 (defn- new-default-options []
   {:body-buffer-size     8192
@@ -382,24 +376,13 @@
          (assoc :handler (http-handler handler handler-opts))))))
 
 (comment
-  server
-
-  (def server
-    (start-server
-     (fn [request respond _raise]
-       (respond {:status  200
-                 :headers {"Content-Type"      "text/html; charset=UTF-8"
-                           ;"Transfer-Encoding" "chunked"
-                           "Content-Length"    "8"}
-                 :body    (str "body=" (slurp (:body request)))}))
-     {:port 4000, :async? true, :reuse-address? true}))
+  (require '[criterium.core :as c])
+  (require '[org.httpkit.server :as hk])
 
   (defn simple-handler [_request]
     {:status  200
      :headers {"Content-Type" "text/plain; charset=UTF-8"}
      :body    "Hello World"})
-
-  (require '[org.httpkit.server :as hk])
 
   (def capra-server   (start-server #'simple-handler {:port 6201}))
   (def httpkit-server (hk/run-server simple-handler {:port 6202}))
