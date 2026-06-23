@@ -1,6 +1,7 @@
 (ns capra.benchmark
   (:require [capra.server :as capra]
-            [clojure.java.shell :as shell]))
+            [clojure.java.shell :as shell]
+            [org.httpkit.server :as httpkit]))
 
 (defn simple-handler [_request]
   {:status  200
@@ -15,5 +16,9 @@
 (defn -main []
   (with-open [_ (capra/start-server simple-handler {:port 5800})]
     (println "Benchmarking Capra...")
-    (println (:out (wrk {:port 5800 :duration "5s"})))
-    (shutdown-agents)))
+    (println (:out (wrk {:port 5800 :duration "5s"}))))
+  (let [close (httpkit/run-server simple-handler {:port 5801})]
+    (try (println "Benchmarking HTTP-Kit...")
+         (println (:out (wrk {:port 5801 :duration "5s"})))
+         (finally (close))))
+  (shutdown-agents))
