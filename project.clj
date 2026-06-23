@@ -10,7 +10,8 @@
   :global-vars {*warn-on-reflection* true}
   :aliases {"bench" ["with-profile" "+bench" "run"]}
   :profiles
-  {:bench {:source-paths ["bench" "src"]
+  {:bench {:dependencies [[ring/ring-jetty-adapter "1.15.5"]]
+           :source-paths ["bench" "src"]
            :main capra.benchmark
            :global-vars {*warn-on-reflection* false}}
    :dev   {:dependencies [[clj-http "3.13.1"]
