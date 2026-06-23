@@ -67,8 +67,8 @@
                     :headers {"Content-Type" "text/plain; charset=UTF-8"
                               "X-Example" ["foo" "bar"]}
                     :body    "Hello World"})
-                 {:port 4321})]
-    (let [response (http/get "http://localhost:4321")]
+                 {:port 4324})]
+    (let [response (http/get "http://localhost:4324")]
       (is (= {"Content-Type"   "text/plain; charset=UTF-8"
               "Content-Length" "11"
               "Server"         "Capra"
@@ -81,8 +81,8 @@
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
                     :body    (.getBytes "Hello World" "UTF-8")})
-                 {:port 4321})]
-    (let [response (http/get "http://localhost:4321")]
+                 {:port 4325})]
+    (let [response (http/get "http://localhost:4325")]
       (is (= {:status  200
               :headers {"Content-Type"      "text/plain; charset=UTF-8"
                         "Content-Length"    "11"
