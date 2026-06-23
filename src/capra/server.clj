@@ -367,10 +367,15 @@
       (when (not= response ::error)
         (respond response false)))))
 
+(defn- new-default-executor []
+  (Executors/newVirtualThreadPerTaskExecutor))
+
 (defn- new-default-options []
-  {:body-buffer-size     8192
-   :response-buffer-size 32768
-   :handler-executor     (Executors/newFixedThreadPool 16)})
+  (let [executor (new-default-executor)]
+    {:body-buffer-size     8192
+     :response-buffer-size 32768
+     :handler-executor     executor
+     :socket-executor      executor}))
 
 (defn start-server ^Closeable [handler options]
   (let [handler-opts (merge (new-default-options) options)
