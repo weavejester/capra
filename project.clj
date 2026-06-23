@@ -8,6 +8,11 @@
                  [org.ring-clojure/ring-core-protocols "1.15.5"]]
   :plugins [[cider/cider-nrepl "0.59.0"]]
   :global-vars {*warn-on-reflection* true}
-  :profiles {:dev {:dependencies [[clj-http "3.13.1"]
-                                  [http-kit "2.8.1"]
-                                  [criterium "0.4.6"]]}})
+  :aliases {"bench" ["with-profile" "+bench" "run"]}
+  :profiles
+  {:bench {:source-paths ["bench" "src"]
+           :main capra.benchmark
+           :global-vars {*warn-on-reflection* false}}
+   :dev   {:dependencies [[clj-http "3.13.1"]
+                          [http-kit "2.8.1"]
+                          [criterium "0.4.6"]]}})
