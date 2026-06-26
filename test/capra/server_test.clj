@@ -130,3 +130,25 @@
                (-> response
                    (select-keys [:status :headers :body])
                    (update :headers dissoc "Date"))))))))
+
+(deftest persistent-connection-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4328})]
+    (http/with-connection-pool {:max-total 1 :default-per-route 1}
+      (let [responses (->> (repeatedly 10 #(http/get "http://localhost:4328"))
+                           (doall)
+                           (map #(-> %
+                                     (select-keys [:status :headers :body])
+                                     (update :headers dissoc "Date"))))]
+        (is (= 10 (count responses)))
+        (is (= 1 (count (distinct responses))))
+        (is (= {:status  200
+                :headers {"Content-Type"      "text/plain; charset=UTF-8"
+                          "Content-Length"    "11"
+                          "Server"            "Capra"}
+                :body    "Hello World"}
+               (first responses)))))))
