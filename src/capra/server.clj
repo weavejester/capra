@@ -64,16 +64,13 @@
   (.put buffer (byte \return))
   (.put buffer (byte \newline)))
 
-(defn- write-chunk [writef ^bytes b off len]
-  (let [header (ascii-bytes (format "%X\r\n" len))]
-    (writef header 0 (alength header))
-    (writef b off len)
-    (writef crlf 0 2)))
-
 (defn- chunked-output-stream ^OutputStream [^OutputStream out]
   (stream/output-stream
-   (fn write [b off len]
-     (write-chunk #(.write out ^bytes %1 %2 %3) b off len))
+   (fn write [^bytes b off len]
+     (let [header (ascii-bytes (format "%X\r\n" len))]
+       (.write out header)
+       (.write out b off len)
+       (.write out ^bytes crlf)))
    (fn close []
      (.write out ^bytes empty-chunk)
      (.close out))))
@@ -117,12 +114,29 @@
     (if (<= len remaining)
       (do (.put buffer bs off len)
           (tcp/write socket (.flip buffer)))
-      (do (.put buffer bs off remaining)
+      (do (when (pos? remaining)
+            (.put buffer bs off remaining))
           (tcp/write socket (.flip buffer)
                      #(let [off (+ off remaining)
                             len (- len remaining)]
                         (.clear buffer)
                         (write-bytes-to-socket socket buffer bs off len)))))))
+
+;; While wrap-bytes-in-chunk does require an additional array to be allocated,
+;; this should be relatively uncommon, as unless explicitly specified the
+;; default for transferring byte arrays is to use the Content-Length field.
+
+(def ^:private end-chunk (ascii-bytes "\r\n0\r\n\r\n"))
+(def ^:private ^:const end-chunk-size 7)
+
+(defn- wrap-bytes-in-chunk ^bytes [^bytes bs off len]
+  (let [header      (ascii-bytes (format "%X\r\n" len))
+        header-size (alength header)
+        chunk       (byte-array (+ header-size len end-chunk-size))]
+    (System/arraycopy header 0 chunk 0 header-size)
+    (System/arraycopy bs off chunk header-size len)
+    (System/arraycopy end-chunk 0 chunk (+ header-size len) end-chunk-size)
+    chunk))
 
 (defprotocol ResponseBody
   (write-body-to-socket [body request response headers buffer socket async?]))
@@ -136,11 +150,9 @@
        (do (write-crlf buffer)
            (write-bytes-to-socket socket buffer body 0 (content-length headers)))
        (chunked-transfer? headers)
-       (do (write-crlf buffer)
-           (write-chunk #(.put buffer ^bytes %1 %2 %3) body 0 (alength body))
-           (.put buffer ^bytes empty-chunk)
-           (.flip buffer)
-           (tcp/write socket buffer))
+       (let [chunk (wrap-bytes-in-chunk body 0 (alength body))]
+         (write-crlf buffer)
+         (write-bytes-to-socket socket buffer chunk 0 (alength chunk)))
        :else
        (let [len (alength body)]
          (.put buffer ^bytes length-header)

@@ -99,12 +99,32 @@
                      {:status  200
                       :headers {"Content-Type" "text/plain; charset=UTF-8"}
                       :body    (.getBytes ^String large-body "UTF-8")})
-                   {:port 4325
+                   {:port 4326
                     :response-buffer-size 200})]
-      (let [response (http/get "http://localhost:4325")]
+      (let [response (http/get "http://localhost:4326")]
+        (is (= {:status  200
+                :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                          "Content-Length" "1200"
+                          "Server"         "Capra"}
+                :body    large-body}
+               (-> response
+                   (select-keys [:status :headers :body])
+                   (update :headers dissoc "Date"))))))))
+
+(deftest large-chunked-array-response-body-test
+  (let [large-body (apply str (repeat 100 "Hello World\n"))]
+    (with-open [_ (capra/start-server
+                   (fn handler [_request]
+                     {:status  200
+                      :headers {"Content-Type" "text/plain; charset=UTF-8"
+                                "Transfer-Encoding" "chunked"}
+                      :body    (.getBytes ^String large-body "UTF-8")})
+                   {:port 4327
+                    :response-buffer-size 200})]
+      (let [response (http/get "http://localhost:4327")]
         (is (= {:status  200
                 :headers {"Content-Type"      "text/plain; charset=UTF-8"
-                          "Content-Length"    "1200"
+                          "Transfer-Encoding" "chunked"
                           "Server"            "Capra"}
                 :body    large-body}
                (-> response
