@@ -48,9 +48,9 @@
                               "Content-Length" (headers "content-length")}
                     :body    (slurp body)})
                  {:port 4323})]
-    (let [response (http/get "http://localhost:4323"
-                             {:headers {"Content-Type" "text/plain"}
-                              :body "Hello World"})]
+    (let [response (http/post "http://localhost:4323"
+                              {:headers {"Content-Type" "text/plain"}
+                               :body "Hello World"})]
       (is (= {:status  200
               :headers {"Content-Type"   "text/plain"
                         "Content-Length" "11"
