@@ -112,6 +112,18 @@
   (or (and (nil? connection) (= protocol "HTTP/1.0"))
       (.equalsIgnoreCase "close" connection)))
 
+(defn- write-bytes-to-socket [socket ^ByteBuffer buffer ^bytes bs off len]
+  (let [remaining (.remaining buffer)]
+    (if (<= len remaining)
+      (do (.put buffer bs off len)
+          (tcp/write socket (.flip buffer)))
+      (do (.put buffer bs off remaining)
+          (tcp/write socket (.flip buffer)
+                     #(let [off (+ off remaining)
+                            len (- len remaining)]
+                        (.clear buffer)
+                        (write-bytes-to-socket socket buffer bs off len)))))))
+
 (defprotocol ResponseBody
   (write-body-to-socket [body request response headers buffer socket async?]))
 
@@ -122,19 +134,20 @@
      (cond
        (headers "content-length")
        (do (write-crlf buffer)
-           (.put buffer body 0 (content-length headers)))
+           (write-bytes-to-socket socket buffer body 0 (content-length headers)))
        (chunked-transfer? headers)
        (do (write-crlf buffer)
            (write-chunk #(.put buffer ^bytes %1 %2 %3) body 0 (alength body))
-           (.put buffer ^bytes empty-chunk))
+           (.put buffer ^bytes empty-chunk)
+           (.flip buffer)
+           (tcp/write socket buffer))
        :else
-       (do (.put buffer ^bytes length-header)
-           (write-ascii buffer (str (alength body)))
-           (write-crlf buffer)
-           (write-crlf buffer)
-           (.put buffer body)))
-     (.flip buffer)
-     (tcp/write socket buffer))})
+       (let [len (alength body)]
+         (.put buffer ^bytes length-header)
+         (write-ascii buffer (str len))
+         (write-crlf buffer)
+         (write-crlf buffer)
+         (write-bytes-to-socket socket buffer body 0 len))))})
 
 (extend-protocol ResponseBody
   String
