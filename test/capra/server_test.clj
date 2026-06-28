@@ -175,3 +175,19 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest exception-in-handler-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   (throw (ex-info "Error" {})))
+                 {:port 4330})]
+    (let [response (http/get "http://localhost:4330"
+                             {:throw-exceptions false})]
+      (is (= {:status  500
+              :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "14"
+                        "Server"         "Capra"}
+              :body    "Internal Error"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))

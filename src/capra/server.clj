@@ -244,6 +244,13 @@
         (write-body-to-socket
          body request response headers buffer socket async?)))))
 
+(defn- ring-raiser [_request respond _opts]
+  (fn [_exception]
+    (respond {:status  500
+              :headers {"Content-Type" "text/plain; charset=UTF-8"}
+              :body    "Internal Error"}
+             true)))
+
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
 
@@ -266,7 +273,7 @@
      (let [handled (atom false)
            request (assoc request :body in)
            respond (ring-responder request socket handled opts)
-           raise   (fn [_ex])]
+           raise   (ring-raiser request respond opts)]
        (ring-handler request respond raise)))
    opts))
 
@@ -285,7 +292,7 @@
         handled (atom false)
         request (persistent! (assoc! request :body body))
         respond (ring-responder request socket handled opts)
-        raise   (fn [_ex])]
+        raise   (ring-raiser request respond opts)]
     (ring-handler request respond raise)
     (init-request socket)))
 
