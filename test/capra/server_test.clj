@@ -152,3 +152,26 @@
                           "Server"            "Capra"}
                 :body    "Hello World"}
                (first responses)))))))
+
+(deftest respond-multiple-calls-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request respond _raise]
+                   (respond
+                    {:status  200
+                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                     :body    "Hello"})
+                   (respond
+                    {:status  200
+                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                     :body    "World"}))
+                 {:port 4329
+                  :async? true})]
+    (let [response (http/get "http://localhost:4329")]
+      (is (= {:status  200
+              :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "5"
+                        "Server"         "Capra"}
+              :body    "Hello"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))

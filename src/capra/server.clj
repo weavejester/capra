@@ -234,14 +234,15 @@
   (persistent! (reduce-kv (fn [m k v] (assoc! m (str/lower-case k) v))
                           (transient {}) headers)))
 
-(defn- ring-responder [request socket {buf-size :response-buffer-size}]
+(defn- ring-responder [request socket handled {buf-size :response-buffer-size}]
   (fn respond [{:keys [headers body] :as response} async?]
-    (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-          headers (lowercase-headers headers)]
-      (.clear ^ByteBuffer buffer)
-      (write-response-head buffer request response)
-      (write-body-to-socket
-       body request response headers buffer socket async?))))
+    (when (compare-and-set! handled false true)
+      (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
+            headers (lowercase-headers headers)]
+        (.clear ^ByteBuffer buffer)
+        (write-response-head buffer request response)
+        (write-body-to-socket
+         body request response headers buffer socket async?)))))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
@@ -262,8 +263,9 @@
 (defn- ring->stream-handler [ring-handler request opts]
   (stream/input-stream-handler
    (fn [in socket]
-     (let [request (assoc request :body in)
-           respond (ring-responder request socket opts)
+     (let [handled (atom false)
+           request (assoc request :body in)
+           respond (ring-responder request socket handled opts)
            raise   (fn [_ex])]
        (ring-handler request respond raise)))
    opts))
@@ -280,8 +282,9 @@
 
 (defn- run-simple-handler [ring-handler request socket opts]
   (let [body    (InputStream/nullInputStream)
+        handled (atom false)
         request (persistent! (assoc! request :body body))
-        respond (ring-responder request socket opts)
+        respond (ring-responder request socket handled opts)
         raise   (fn [_ex])]
     (ring-handler request respond raise)
     (init-request socket)))
