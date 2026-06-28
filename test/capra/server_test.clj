@@ -191,3 +191,20 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest nil-response-body-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  301
+                    :headers {"Location" "http://example.com"}})
+                 {:port 4331})]
+    (let [response (http/get "http://localhost:4331"
+                             {:redirect-strategy :none})]
+      (is (= {:status  301
+              :headers {"Content-Length" "0"
+                        "Location"       "http://example.com"
+                        "Server"         "Capra"}
+              :body    ""}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))

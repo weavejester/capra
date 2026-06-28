@@ -20,7 +20,8 @@
 (def ^:private empty-chunk    (ascii-bytes "0\r\n\r\n"))
 (def ^:private server-header  (ascii-bytes "Server: Capra\r\n"))
 (def ^:private chunked-header (ascii-bytes "Transfer-Encoding: chunked\r\n"))
-(def ^:private length-header  (ascii-bytes "Content-Length: "))
+(def ^:private length-header      (ascii-bytes "Content-Length: "))
+(def ^:private zero-length-header (ascii-bytes "Content-Length: 0\r\n\r\n"))
 (def ^:private date-header    (ascii-bytes "Date: "))
 (def ^:private crlf           (ascii-bytes "\r\n"))
 
@@ -168,7 +169,6 @@
           body-bytes      (.getBytes body (or charset "UTF-8"))]
       (write-body-to-socket
        body-bytes request response headers buffer socket async?)))
-
   Object
   (write-body-to-socket [body response request headers buffer socket async?]
     (when (and (nil? (headers "transfer-encoding"))
@@ -185,7 +185,17 @@
                 (limited-output-stream out (content-length headers)))]
       (try (ring/write-body-to-stream body response out)
            (finally
-             (when-not async? (.close out)))))))
+             (when-not async? (.close out))))))
+  nil
+  (write-body-to-socket
+    [_body _resp _req headers ^ByteBuffer buffer socket _async?]
+    (cond
+      (chunked-transfer? headers)
+      (.put buffer ^bytes end-chunk)
+      (nil? (headers "content-length"))
+      (.put buffer ^bytes zero-length-header))
+    (.flip buffer)
+    (tcp/write socket buffer)))
 
 (defn- rfc-1123-date-time []
   (.format (ZonedDateTime/now ZoneOffset/UTC)
