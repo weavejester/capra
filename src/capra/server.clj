@@ -244,12 +244,8 @@
         (write-body-to-socket
          body request response headers buffer socket async?)))))
 
-(defn- ring-raiser [_request respond _opts]
-  (fn [_exception]
-    (respond {:status  500
-              :headers {"Content-Type" "text/plain; charset=UTF-8"}
-              :body    "Internal Error"}
-             true)))
+(defn- ring-raiser [request respond {:keys [error-handler]}]
+  (fn [exception] (error-handler request #(respond % true) exception)))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
@@ -366,8 +362,10 @@
   (locking *err* (binding [*out* *err*]) (prn ex)))
 
 (defn- http-handler
-  [handler {:keys [handler-executor body-buffer-size response-buffer-size]}]
-  (let [opts {:executor             handler-executor
+  [handler {:keys [handler-executor body-buffer-size response-buffer-size
+                   error-handler]}]
+  (let [opts {:error-handler        error-handler
+              :executor             handler-executor
               :read-buffer-size     body-buffer-size
               :response-buffer-size response-buffer-size}]
     (fn
@@ -402,6 +400,11 @@
       (when (not= response ::error)
         (respond response false)))))
 
+(defn- default-error-handler [_request respond _exception]
+  (respond {:status  500
+            :headers {"Content-Type" "text/plain; charset=UTF-8"}
+            :body    "Internal Server Error"}))
+
 (defn- new-default-executor []
   (Executors/newVirtualThreadPerTaskExecutor))
 
@@ -409,6 +412,7 @@
   (let [executor (new-default-executor)]
     {:body-buffer-size     8192
      :response-buffer-size 32768
+     :error-handler        default-error-handler
      :handler-executor     executor
      :socket-executor      executor}))
 

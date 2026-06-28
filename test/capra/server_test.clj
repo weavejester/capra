@@ -185,9 +185,9 @@
                              {:throw-exceptions false})]
       (is (= {:status  500
               :headers {"Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "14"
+                        "Content-Length" "21"
                         "Server"         "Capra"}
-              :body    "Internal Error"}
+              :body    "Internal Server Error"}
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
