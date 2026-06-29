@@ -234,19 +234,49 @@
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                              "Content-Length" "10"}
+                    :body    (java.io.ByteArrayInputStream.
+                              (.getBytes "Hello World" "UTF-8"))})
+                 {:port 4333})]
+    (let [response (http/get "http://localhost:4333")]
+      (is (= {:status  200
+              :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "10"
+                        "Server"         "Capra"}
+              :body    "Hello Worl"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))
+          "Shorter Content-Length cuts off body")))
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type"   "text/plain; charset=UTF-8"
                               "Content-Length" "12"}
                     :body    "Hello World"})
-                 {:port 4333})]
+                 {:port 4334})]
     (is (thrown-with-msg? org.apache.http.ConnectionClosedException
                           #"Premature end of Content-Length"
-                          (http/get "http://localhost:4333"))
+                          (http/get "http://localhost:4334"))
+        "Longer Content-Length immediately closes"))
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                              "Content-Length" "12"}
+                    :body    (java.io.ByteArrayInputStream.
+                              (.getBytes "Hello World" "UTF-8"))})
+                 {:port 4335})]
+    (is (thrown-with-msg? org.apache.http.ConnectionClosedException
+                          #"Premature end of Content-Length"
+                          (http/get "http://localhost:4335"))
         "Longer Content-Length immediately closes"))
   (with-open [_ (capra/start-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Length" "1"}})
-                 {:port 4334})]
+                 {:port 4336})]
     (is (thrown-with-msg? org.apache.http.ConnectionClosedException
                           #"Premature end of Content-Length"
-                          (http/get "http://localhost:4334"))
+                          (http/get "http://localhost:4336"))
         "Longer Content-Length immediately closes")))

@@ -76,7 +76,7 @@
      (.write out ^bytes empty-chunk)
      (.close out))))
 
-(defn- limited-output-stream ^OutputStream [^OutputStream out limit]
+(defn- limited-output-stream ^OutputStream [^OutputStream out limit socket]
   (let [limit (AtomicInteger. limit)]
     (stream/output-stream
      (fn write [^bytes b off len]
@@ -84,7 +84,9 @@
          (when (pos? len)
            (.write out b off len))))
      (fn close []
-       (.close out)))))
+       (.close out)
+       (when (pos? (.get limit))
+         (tcp/close socket))))))
 
 (defn- content-length [{:strs [content-length]}]
   (some-> content-length Long/parseLong))
@@ -187,7 +189,7 @@
                 (stream/socket->output-stream socket {:on-close (fn [_])}))
           out (if (chunked-response? headers)
                 (chunked-output-stream out)
-                (limited-output-stream out (content-length headers)))]
+                (limited-output-stream out (content-length headers) socket))]
       (try (ring/write-body-to-stream body response out)
            (finally
              (when-not async? (.close out))))))
