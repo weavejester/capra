@@ -254,8 +254,10 @@
         (write-body-to-socket
          body request response headers buffer socket async?)))))
 
-(defn- ring-raiser [request respond {:keys [error-handler]}]
-  (fn [exception] (error-handler request #(respond % true) exception)))
+(defn- ring-raiser [request respond {:keys [error-handler error-logger]}]
+  (fn [exception]
+    (error-logger exception)
+    (error-handler request #(respond % true) exception)))
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
@@ -368,16 +370,12 @@
     (tcp/close socket)
     nil))
 
-(defn- print-ex [ex]
-  (locking *err* (binding [*out* *err*]) (prn ex)))
-
 (defn- http-handler
-  [handler {:keys [handler-executor body-buffer-size response-buffer-size
-                   error-handler]}]
-  (let [opts {:error-handler        error-handler
-              :executor             handler-executor
-              :read-buffer-size     body-buffer-size
-              :response-buffer-size response-buffer-size}]
+  [handler {:keys [handler-executor body-buffer-size error-logger]
+            :as   options}]
+  (let [opts (assoc options
+                    :executor         handler-executor
+                    :read-buffer-size body-buffer-size)]
     (fn
       ([socket]
        (init-request socket))
@@ -394,7 +392,7 @@
            (recur new-state)
            state)))
       ([{::keys [step] :as state} exception]
-       (when exception (print-ex exception))
+       (when exception (error-logger exception))
        (case step
          :body (close-response state exception)
          nil)))))
@@ -415,6 +413,9 @@
             :headers {"Content-Type" "text/plain; charset=UTF-8"}
             :body    "Internal Server Error"}))
 
+(defn- default-error-logger [exception]
+  (locking *err* (binding [*out* *err*]) (prn exception)))
+
 (defn- new-default-executor []
   (Executors/newVirtualThreadPerTaskExecutor))
 
@@ -423,6 +424,7 @@
     {:body-buffer-size     8192
      :response-buffer-size 32768
      :error-handler        default-error-handler
+     :error-logger         default-error-logger
      :handler-executor     executor
      :socket-executor      executor}))
 
