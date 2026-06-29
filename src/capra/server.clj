@@ -148,8 +148,13 @@
    (fn [^bytes body _resp _req headers ^ByteBuffer buffer socket _async?]
      (cond
        (headers "content-length")
-       (do (write-crlf buffer)
-           (write-bytes-to-socket socket buffer body 0 (content-length headers)))
+       (let [content-len (content-length headers)
+             body-len    (alength body)]
+         (write-crlf buffer)
+         (if (<= content-len body-len)
+           (write-bytes-to-socket socket buffer body 0 content-len)
+           (do (write-bytes-to-socket socket buffer body 0 body-len)
+               (tcp/close socket))))
        (chunked-transfer? headers)
        (let [chunk (wrap-bytes-in-chunk body 0 (alength body))]
          (write-crlf buffer)
@@ -190,12 +195,17 @@
   (write-body-to-socket
     [_body _resp _req headers ^ByteBuffer buffer socket _async?]
     (cond
+      (headers "content-length")
+      (do (write-crlf buffer)
+          (tcp/write socket (.flip buffer))
+          (when-not (zero? (content-length headers))
+            (tcp/close socket)))
       (chunked-transfer? headers)
-      (.put buffer ^bytes end-chunk)
-      (nil? (headers "content-length"))
-      (.put buffer ^bytes zero-length-header))
-    (.flip buffer)
-    (tcp/write socket buffer)))
+      (do (.put buffer ^bytes end-chunk)
+          (tcp/write socket (.flip buffer)))
+      :else
+      (do (.put buffer ^bytes zero-length-header)
+          (tcp/write socket (.flip buffer))))))
 
 (defn- rfc-1123-date-time []
   (.format (ZonedDateTime/now ZoneOffset/UTC)
