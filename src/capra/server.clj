@@ -112,18 +112,17 @@
   (or (and (nil? connection) (= protocol "HTTP/1.0"))
       (.equalsIgnoreCase "close" connection)))
 
-(defn- write-bytes-to-socket [socket ^ByteBuffer buffer ^bytes bs off len]
-  (let [remaining (.remaining buffer)]
-    (if (<= len remaining)
-      (do (.put buffer bs off len)
-          (tcp/write socket (.flip buffer)))
-      (do (when (pos? remaining)
-            (.put buffer bs off remaining))
-          (tcp/write socket (.flip buffer)
-                     #(let [off (+ off remaining)
-                            len (- len remaining)]
-                        (.clear buffer)
-                        (write-bytes-to-socket socket buffer bs off len)))))))
+(defn- run-writer [writerf socket ^ByteBuffer buffer]
+  (if (writerf buffer)
+    (tcp/write socket (.flip buffer))
+    (tcp/write socket (.flip buffer)
+               #(run-writer writerf socket (.clear buffer)))))
+
+(defn- bytes-writer [^bytes bs off len]
+  (let [read-buf (ByteBuffer/wrap bs off len)]
+    (fn [write-buf]
+      (buf/copy read-buf write-buf)
+      (not (.hasRemaining read-buf)))))
 
 ;; While wrap-bytes-in-chunk does require an additional array to be allocated,
 ;; this should be relatively uncommon, as unless explicitly specified the
@@ -154,20 +153,20 @@
              body-len    (alength body)]
          (write-crlf buffer)
          (if (<= content-len body-len)
-           (write-bytes-to-socket socket buffer body 0 content-len)
-           (do (write-bytes-to-socket socket buffer body 0 body-len)
+           (run-writer (bytes-writer body 0 content-len) socket buffer)
+           (do (run-writer (bytes-writer body 0 body-len) socket buffer)
                (tcp/close socket))))
        (chunked-transfer? headers)
        (let [chunk (wrap-bytes-in-chunk body 0 (alength body))]
          (write-crlf buffer)
-         (write-bytes-to-socket socket buffer chunk 0 (alength chunk)))
+         (run-writer (bytes-writer chunk 0 (alength chunk)) socket buffer))
        :else
        (let [len (alength body)]
          (.put buffer ^bytes length-header)
          (write-ascii buffer (str len))
          (write-crlf buffer)
          (write-crlf buffer)
-         (write-bytes-to-socket socket buffer body 0 len))))})
+         (run-writer (bytes-writer body 0 len) socket buffer))))})
 
 (extend-protocol ResponseBody
   String
