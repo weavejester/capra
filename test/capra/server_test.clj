@@ -1,7 +1,16 @@
 (ns capra.server-test
-  (:require [clojure.test :refer [deftest is]]
-            [capra.server :as capra]
-            [clj-http.client :as http]))
+  (:require [capra.server :as capra]
+            [clj-http.client :as http]
+            [clojure.java.io :as io]
+            [clojure.string :as str]
+            [clojure.test :refer [deftest is]]))
+
+(defn- raw-http-request [^String host ^long port ^String raw-request]
+  (with-open [socket (java.net.Socket. host port)
+              writer (io/writer (.getOutputStream socket) :encoding "US-ASCII")]
+    (.write writer raw-request)
+    (.flush writer)
+    (slurp (.getInputStream socket) :encoding "US-ASCII")))
 
 (deftest request-response-test
   (with-open [_ (capra/start-server
@@ -280,3 +289,26 @@
                           #"Premature end of Content-Length"
                           (http/get "http://localhost:4336"))
         "Longer Content-Length immediately closes")))
+
+(deftest unsupported-transfer-encoding-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4337})]
+    (let [response (raw-http-request
+                    "localhost" 4337
+                    (str "POST / HTTP/1.1\r\n"
+                         "Transfer-Encoding: gzip\r\n"
+                         "Content-Length: 3\r\n"
+                         "\r\n"
+                         "foo"))]
+      (is (= (str "HTTP/1.1 501 Not Implemented\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 90\r\n\r\n"
+                  "Unsupported request transfer encoding: \"gzip\".\n"
+                  "Only \"chunked\" transfer encoding supported.")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))

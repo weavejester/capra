@@ -1,5 +1,6 @@
 (ns capra.server
-  (:require [capra.http.reason :as reason]
+  (:require [capra.http.error :as err]
+            [capra.http.reason :as reason]
             [clojure.string :as str]
             [ring.core.protocols :as ring]
             [teensyp.buffer :as buf]
@@ -269,19 +270,6 @@
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
 
-(defn- transfer-encoding-error
-  [{:keys [protocol] {:strs [transfer-encoding]} :headers}]
-  (let [body (str "Unsupported request transfer encoding: \""
-                  transfer-encoding "\".\n"
-                  "Only \"chunked\" transfer encoding supported.")]
-    (str protocol " 501 Not Implemented\r\n"
-         (date-header)
-         "Connection: close\r\n"
-         "Content-Type: text/plain; charset=UTF-8\r\n"
-         "Content-Length: " (count (ascii-bytes body))
-         "Server: Capra"
-         body)))
-
 (defn- ring->stream-handler [ring-handler request opts]
   (stream/input-stream-handler
    (fn [in socket]
@@ -317,8 +305,7 @@
 
 (defn- run-ring-handler [ring-handler request socket opts]
   (if (not (valid-transfer-encoding? request))
-    {::step     :error
-     ::response (transfer-encoding-error request)}
+    {::step :error, ::error :unsupported-transfer-encoding, ::request request}
     (if (empty-request-body? request)
       (run-simple-handler ring-handler request socket opts)
       (run-streaming-handler ring-handler request socket opts))))
@@ -371,9 +358,11 @@
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
 
-(defn- write-error-response [{::keys [response]} socket]
-  (let [response-bytes (ascii-bytes response)]
-    (tcp/write socket (ByteBuffer/wrap response-bytes))
+(defn- write-error-response [{::keys [error request]} socket opts]
+  (let [handled (atom false)
+        respond (ring-responder request socket handled opts)
+        handler (err/error-handlers error)]
+    (respond (handler request) false)
     (tcp/close socket)
     nil))
 
@@ -394,7 +383,7 @@
                      :headers    (parse-header state buffer)
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
-                     :error      (write-error-response state socket)
+                     :error      (write-error-response state socket opts)
                      nil)]
            (recur new-state)
            state)))
