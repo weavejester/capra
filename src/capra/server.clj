@@ -233,12 +233,15 @@
     (.put (byte \return))
     (.put (byte \newline))))
 
+(defn- write-date-header [^ByteBuffer buffer]
+  (.put buffer ^bytes date-header)
+  (write-ascii buffer (rfc-1123-date-time))
+  (write-crlf buffer))
+
 (defn- write-response-head
   [^ByteBuffer buffer request {:keys [headers] :as response}]
   (write-status-line buffer request response)
-  (.put buffer ^bytes date-header)
-  (write-ascii buffer (rfc-1123-date-time))
-  (write-crlf buffer)
+  (write-date-header buffer)
   (.put buffer ^bytes server-header)
   (doseq [kv headers]
     (let [value (val kv)]
