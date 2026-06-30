@@ -124,21 +124,18 @@
       (buf/copy read-buf write-buf)
       (not (.hasRemaining read-buf)))))
 
-;; While wrap-bytes-in-chunk does require an additional array to be allocated,
-;; this should be relatively uncommon, as unless explicitly specified the
-;; default for transferring byte arrays is to use the Content-Length field.
-
 (def ^:private end-chunk (ascii-bytes "\r\n0\r\n\r\n"))
-(def ^:private ^:const end-chunk-size 7)
 
-(defn- wrap-bytes-in-chunk ^bytes [^bytes bs off len]
-  (let [header      (ascii-bytes (format "%X\r\n" len))
-        header-size (alength header)
-        chunk       (byte-array (+ header-size len end-chunk-size))]
-    (System/arraycopy header 0 chunk 0 header-size)
-    (System/arraycopy bs off chunk header-size len)
-    (System/arraycopy end-chunk 0 chunk (+ header-size len) end-chunk-size)
-    chunk))
+(defn- chunk-writer [^bytes bs off len]
+  (let [buffers [(ByteBuffer/wrap (ascii-bytes (format "%X\r\n" len)))
+                 (ByteBuffer/wrap bs off len)
+                 (ByteBuffer/wrap end-chunk)]
+        index   (volatile! 0)]
+    (fn [write-buf]
+      (let [read-buf ^ByteBuffer (buffers @index)]
+        (buf/copy read-buf write-buf)
+        (when-not (.hasRemaining read-buf)
+          (> (vswap! index inc) 2))))))
 
 (defprotocol ResponseBody
   (write-body-to-socket [body request response headers buffer socket async?]))
@@ -157,9 +154,8 @@
            (do (run-writer (bytes-writer body 0 body-len) socket buffer)
                (tcp/close socket))))
        (chunked-transfer? headers)
-       (let [chunk (wrap-bytes-in-chunk body 0 (alength body))]
-         (write-crlf buffer)
-         (run-writer (bytes-writer chunk 0 (alength chunk)) socket buffer))
+       (do (write-crlf buffer)
+           (run-writer (chunk-writer body 0 (alength body)) socket buffer))
        :else
        (let [len (alength body)]
          (.put buffer ^bytes length-header)
