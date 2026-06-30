@@ -144,7 +144,7 @@
 (extend (Class/forName "[B")
   ResponseBody
   {:write-body-to-socket
-   (fn [^bytes body _resp _req headers ^ByteBuffer buffer socket _async?]
+   (fn [^bytes body _resp request headers ^ByteBuffer buffer socket _async?]
      (cond
        (headers "content-length")
        (let [content-len (content-length headers)
@@ -163,7 +163,9 @@
          (write-ascii buffer (str len))
          (write-crlf buffer)
          (write-crlf buffer)
-         (run-writer (bytes-writer body 0 len) socket buffer))))})
+         (run-writer (bytes-writer body 0 len) socket buffer)))
+     (when (close-connection? request)
+       (tcp/close socket)))})
 
 (extend-protocol ResponseBody
   String
@@ -191,7 +193,7 @@
              (when-not async? (.close out))))))
   nil
   (write-body-to-socket
-    [_body _resp _req headers ^ByteBuffer buffer socket _async?]
+    [_body _resp request headers ^ByteBuffer buffer socket _async?]
     (cond
       (headers "content-length")
       (do (write-crlf buffer)
@@ -203,7 +205,9 @@
           (tcp/write socket (.flip buffer)))
       :else
       (do (.put buffer ^bytes zero-length-header)
-          (tcp/write socket (.flip buffer))))))
+          (tcp/write socket (.flip buffer))))
+    (when (close-connection? request)
+      (tcp/close socket))))
 
 (defn- rfc-1123-date-time []
   (.format (ZonedDateTime/now ZoneOffset/UTC)

@@ -8,6 +8,7 @@
 (defn- raw-http-request [^String host ^long port ^String raw-request]
   (with-open [socket (java.net.Socket. host port)
               writer (io/writer (.getOutputStream socket) :encoding "US-ASCII")]
+    (.setSoTimeout socket 1000)
     (.write writer raw-request)
     (.flush writer)
     (slurp (.getInputStream socket) :encoding "US-ASCII")))
@@ -311,4 +312,23 @@
                   "Content-Length: 90\r\n\r\n"
                   "Unsupported request transfer encoding: \"gzip\".\n"
                   "Only \"chunked\" transfer encoding supported.")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest client-connection-close-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4338})]
+    (let [response (raw-http-request
+                    "localhost" 4338
+                    (str "GET / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Connection: close\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 200 OK\r\n"
+                  "Server: Capra\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 11\r\n\r\n"
+                  "Hello World")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
