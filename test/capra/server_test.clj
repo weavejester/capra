@@ -22,9 +22,10 @@
                  {:port 4321})]
     (let [response (http/get "http://localhost:4321")]
       (is (= {:status  200
-              :headers {"Content-Type"      "text/plain; charset=UTF-8"
-                        "Content-Length"    "11"
-                        "Server"            "Capra"}
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "11"
+                        "Server"         "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
@@ -42,7 +43,8 @@
                  {:port 4322})]
     (let [response (http/get "http://localhost:4322")]
       (is (= {:status  200
-              :headers {"Content-Type"   "text/plain"
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain"
                         "Content-Length" "11"
                         "Server"         "Capra"}
               :body    "Hello World"}
@@ -62,7 +64,8 @@
                               {:headers {"Content-Type" "text/plain"}
                                :body "Hello World"})]
       (is (= {:status  200
-              :headers {"Content-Type"   "text/plain"
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain"
                         "Content-Length" "11"
                         "Server"         "Capra"}
               :body    "Hello World"}
@@ -79,7 +82,8 @@
                     :body    "Hello World"})
                  {:port 4324})]
     (let [response (http/get "http://localhost:4324")]
-      (is (= {"Content-Type"   "text/plain; charset=UTF-8"
+      (is (= {"Connection"     "close"
+              "Content-Type"   "text/plain; charset=UTF-8"
               "Content-Length" "11"
               "Server"         "Capra"
               "X-Example"      ["foo" "bar"]}
@@ -94,9 +98,10 @@
                  {:port 4325})]
     (let [response (http/get "http://localhost:4325")]
       (is (= {:status  200
-              :headers {"Content-Type"      "text/plain; charset=UTF-8"
-                        "Content-Length"    "11"
-                        "Server"            "Capra"}
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "11"
+                        "Server"         "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
@@ -113,7 +118,8 @@
                     :response-buffer-size 200})]
       (let [response (http/get "http://localhost:4326")]
         (is (= {:status  200
-                :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                :headers {"Connection"     "close"
+                          "Content-Type"   "text/plain; charset=UTF-8"
                           "Content-Length" "1200"
                           "Server"         "Capra"}
                 :body    large-body}
@@ -133,7 +139,8 @@
                     :response-buffer-size 200})]
       (let [response (http/get "http://localhost:4327")]
         (is (= {:status  200
-                :headers {"Content-Type"      "text/plain; charset=UTF-8"
+                :headers {"Connection"        "close"
+                          "Content-Type"      "text/plain; charset=UTF-8"
                           "Transfer-Encoding" "chunked"
                           "Server"            "Capra"}
                 :body    large-body}
@@ -178,7 +185,8 @@
                   :async? true})]
     (let [response (http/get "http://localhost:4329")]
       (is (= {:status  200
-              :headers {"Content-Type"   "text/plain; charset=UTF-8"
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
                         "Content-Length" "5"
                         "Server"         "Capra"}
               :body    "Hello"}
@@ -196,7 +204,8 @@
       (let [response (http/get "http://localhost:4330"
                                {:throw-exceptions false})]
         (is (= {:status  500
-                :headers {"Content-Type"   "text/plain; charset=UTF-8"
+                :headers {"Connection"     "close"
+                          "Content-Type"   "text/plain; charset=UTF-8"
                           "Content-Length" "21"
                           "Server"         "Capra"}
                 :body    "Internal Server Error"}
@@ -214,7 +223,8 @@
     (let [response (http/get "http://localhost:4331"
                              {:redirect-strategy :none})]
       (is (= {:status  301
-              :headers {"Content-Length" "0"
+              :headers {"Connection"     "close"
+                        "Content-Length" "0"
                         "Location"       "http://example.com"
                         "Server"         "Capra"}
               :body    ""}
@@ -232,7 +242,8 @@
                  {:port 4332})]
     (let [response (http/get "http://localhost:4332")]
       (is (= {:status  200
-              :headers {"Content-Type"   "text/plain; charset=UTF-8"
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
                         "Content-Length" "10"
                         "Server"         "Capra"}
               :body    "Hello Worl"}
@@ -250,7 +261,8 @@
                  {:port 4333})]
     (let [response (http/get "http://localhost:4333")]
       (is (= {:status  200
-              :headers {"Content-Type"   "text/plain; charset=UTF-8"
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
                         "Content-Length" "10"
                         "Server"         "Capra"}
               :body    "Hello Worl"}
@@ -327,6 +339,7 @@
                          "Host: localhost\r\n"
                          "Connection: close\r\n\r\n"))]
       (is (= (str "HTTP/1.1 200 OK\r\n"
+                  "Connection: close\r\n"
                   "Server: Capra\r\n"
                   "Content-Type: text/plain; charset=UTF-8\r\n"
                   "Content-Length: 11\r\n\r\n"

@@ -18,13 +18,15 @@
 (defn- ascii-bytes ^bytes [^String s]
   (.getBytes s StandardCharsets/US_ASCII))
 
-(def ^:private empty-chunk    (ascii-bytes "0\r\n\r\n"))
-(def ^:private server-header  (ascii-bytes "Server: Capra\r\n"))
-(def ^:private chunked-header (ascii-bytes "Transfer-Encoding: chunked\r\n"))
+(def ^:private empty-chunk      (ascii-bytes "0\r\n\r\n"))
+(def ^:private server-header    (ascii-bytes "Server: Capra\r\n"))
+(def ^:private chunked-header   (ascii-bytes "Transfer-Encoding: chunked\r\n"))
 (def ^:private length-header      (ascii-bytes "Content-Length: "))
 (def ^:private zero-length-header (ascii-bytes "Content-Length: 0\r\n\r\n"))
-(def ^:private date-header    (ascii-bytes "Date: "))
-(def ^:private crlf           (ascii-bytes "\r\n"))
+(def ^:private date-header      (ascii-bytes "Date: "))
+(def ^:private close-header     (ascii-bytes "Connection: close\r\n"))
+(def ^:private keepalive-header (ascii-bytes "Connection: keep-alive\r\n"))
+(def ^:private crlf             (ascii-bytes "\r\n"))
 
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
@@ -108,10 +110,6 @@
 (defn- content-charset [{:strs [content-type]}]
   (when-let [m (re-find re-charset content-type)]
     (or (m 1) (m 2))))
-
-(defn- close-connection? [{:keys [protocol] {:strs [connection]} :headers}]
-  (or (and (nil? connection) (= protocol "HTTP/1.0"))
-      (.equalsIgnoreCase "close" connection)))
 
 (defn- run-writer [writerf socket ^ByteBuffer buffer]
   (if (writerf buffer)
@@ -236,11 +234,16 @@
   (write-ascii buffer (rfc-1123-date-time))
   (write-crlf buffer))
 
+(defn- write-conn-header [^ByteBuffer buffer {:keys [protocol]} close?]
+  (when (not= (boolean close?) (= protocol "HTTP/1.0"))
+    (.put buffer (if close? ^bytes close-header ^bytes keepalive-header))))
+
 (defn- write-response-head
-  [^ByteBuffer buffer request {:keys [headers] :as response}]
+  [^ByteBuffer buffer request {:keys [headers] :as response} lc-headers close?]
   (write-status-line buffer request response)
-  (write-date-header buffer)
-  (.put buffer ^bytes server-header)
+  (when-not (lc-headers "connection") (write-conn-header buffer request close?))
+  (when-not (lc-headers "date")       (write-date-header buffer))
+  (when-not (lc-headers "server")     (.put buffer ^bytes server-header))
   (doseq [kv headers]
     (let [value (val kv)]
       (if (vector? value)
@@ -257,15 +260,26 @@
   (persistent! (reduce-kv (fn [m k v] (assoc! m (str/lower-case k) v))
                           (transient {}) headers)))
 
+(def ^:private re-close-connection #"(?i)(^| *,)close( *,|$)")
+
+(defn- request-close? [{:keys [protocol] {:strs [connection]} :headers}]
+  (if (nil? connection)
+    (= protocol "HTTP/1.0")
+    (re-find re-close-connection connection)))
+
+(defn- response-close? [{:strs [connection]}]
+  (when connection (re-find re-close-connection connection)))
+
 (defn- ring-responder [request socket handled {buf-size :response-buffer-size}]
   (fn respond [{:keys [headers body] :as response} async?]
     (when (compare-and-set! handled false true)
       (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-            headers (lowercase-headers headers)]
+            headers (lowercase-headers headers)
+            close?  (request-close? request)]
         (.clear ^ByteBuffer buffer)
-        (write-response-head buffer request response)
+        (write-response-head buffer request response headers close?)
         (write-body-to-socket body response headers buffer socket async?
-                              #(when (close-connection? request)
+                              #(when (or close? (response-close? headers))
                                  (tcp/close socket)))))))
 
 (defn- ring-raiser [request respond {:keys [error-handler error-logger]}]
@@ -442,6 +456,44 @@
 
 (comment
   (require '[criterium.core :as c])
+
+  (defn- write-response-head-1
+    [^ByteBuffer buffer request {:keys [headers] :as response} lc-headers]
+    (write-status-line buffer request response)
+    (when-not (lc-headers "date")
+      (write-date-header buffer))
+    (when-not (lc-headers "server")
+      (.put buffer ^bytes server-header))
+    (doseq [kv headers]
+      (let [value (val kv)]
+        (if (vector? value)
+          (doseq [v value] (write-header buffer (key kv) v))
+          (write-header buffer (key kv) value)))))
+
+  (defn- write-response-head-2
+    [^ByteBuffer buffer request {:keys [headers] :as response} lc-headers]
+    (write-status-line buffer request response)
+    (let [headers (cond-> headers
+                    (not (lc-headers "date"))
+                    (assoc "Date" (rfc-1123-date-time))
+                    (not (lc-headers "server"))
+                    (assoc "Server" "Capra"))]
+      (doseq [kv headers]
+        (let [value (val kv)]
+          (if (vector? value)
+            (doseq [v value] (write-header buffer (key kv) v))
+            (write-header buffer (key kv) value))))))
+
+  (def request  {:protocol "HTTP/1.1"})
+  (def response {:status 200
+                 :headers {"Content-Type" "text/plain; charset=UTF-8"}})
+  (def buffer   (ByteBuffer/allocate 256))
+  (def headers  (lowercase-headers (:headers response)))
+
+  (c/quick-bench
+   (do (.clear ^ByteBuffer buffer)
+       (write-response-head-1 buffer request response headers)))
+
   (require '[org.httpkit.server :as hk])
 
   (defn simple-handler [_request]
