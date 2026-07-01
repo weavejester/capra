@@ -428,3 +428,21 @@
                   "Unsupported HTTP version: \"HTTP/0.9\".\n"
                   "Only \"HTTP/1.0\" and \"HTTP/1.1\" supported.")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest invalid-request-start-line-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4341})]
+    (let [response (raw-http-request
+                    "localhost" 4341
+                    "Hello World??\r\n")]
+      (is (= (str "HTTP/1.1 400 Bad Request\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 32\r\n\r\n"
+                  "Invalid HTTP request start line.")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))

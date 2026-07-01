@@ -38,18 +38,23 @@
                 :server-name (.getHostString local)
                 :remote-addr (.getHostString remote)})))
 
-(defn- parse-start-line [state ^ByteBuffer buffer max-buffer-size]
+(defn- parse-start-line [state line]
+  (or (when-some [space1 (str/index-of line \space)]
+        (when-some [space2 (str/index-of line \space (inc space1))]
+          (assoc! state
+                  ::step          :headers
+                  :request-method (keyword (str/lower-case (subs line 0 space1)))
+                  :uri            (subs line (inc space1) space2)
+                  :protocol       (subs line (inc space2))
+                  :headers        (transient {}))))
+      {::step  :error
+       ::error :invalid-request-start-line}))
+
+(defn- read-start-line [state ^ByteBuffer buffer max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
-    (let [space1   (str/index-of line \space)
-          space2   (str/index-of line \space (inc space1))
-          protocol (subs line (inc space2))]
-      (if (or (= protocol "HTTP/1.1") (= protocol "HTTP/1.0"))
-        (assoc! state
-                ::step          :headers
-                :request-method (keyword (str/lower-case (subs line 0 space1)))
-                :uri            (subs line (inc space1) space2)
-                :protocol       protocol
-                :headers        (transient {}))
+    (let [{:keys [protocol] :as state} (parse-start-line state line)]
+      (if (or (nil? protocol) (= protocol "HTTP/1.1") (= protocol "HTTP/1.0"))
+        state
         {::step    :error
          ::error   :http-version-not-supported
          ::request {:bad-protocol protocol}}))
@@ -62,7 +67,7 @@
             (str/lower-case (subs line 0 colon-index))
             (str/trim       (subs line (inc colon-index))))))
 
-(defn- parse-header [{:keys [headers] :as state} buffer max-buffer-size]
+(defn- read-header [{:keys [headers] :as state} buffer max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (if (= line "")
       (assoc! state ::step :handler, :headers (persistent! headers))
@@ -416,8 +421,8 @@
        (loop [state state]
          (if-some [new-state
                    (case (::step state)
-                     :start-line (parse-start-line state buffer max-buf-size)
-                     :headers    (parse-header state buffer max-buf-size)
+                     :start-line (read-start-line state buffer max-buf-size)
+                     :headers    (read-header state buffer max-buf-size)
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
                      :error      (write-error-response state socket opts)

@@ -33,6 +33,12 @@
       :headers {"Connection" "close"
                 "Content-Type" "text/plain; charset=UTF-8"}
       :body    (str "Unsupported HTTP version: \"" bad-protocol "\".\n"
-                    "Only \"HTTP/1.0\" and \"HTTP/1.1\" supported.")})})
+                    "Only \"HTTP/1.0\" and \"HTTP/1.1\" supported.")})
+   :invalid-request-start-line
+   (constantly
+    {:status  400
+     :headers {"Connection" "close"
+               "Content-Type" "text/plain; charset=UTF-8"}
+     :body    "Invalid HTTP request start line."})}) 
 
 
