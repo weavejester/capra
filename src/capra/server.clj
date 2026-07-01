@@ -139,12 +139,13 @@
           (> (vswap! index inc) 2))))))
 
 (defprotocol ResponseBody
-  (write-body-to-socket [body request response headers buffer socket async?]))
+  (write-body-to-socket
+    [body response headers buffer socket async? callback]))
 
 (extend (Class/forName "[B")
   ResponseBody
   {:write-body-to-socket
-   (fn [^bytes body _resp request headers ^ByteBuffer buffer socket _async?]
+   (fn [^bytes body _response headers buffer socket _async? callback]
      (cond
        (headers "content-length")
        (let [content-len (content-length headers)
@@ -159,32 +160,30 @@
            (run-writer (chunk-writer body 0 (alength body)) socket buffer))
        :else
        (let [len (alength body)]
-         (.put buffer ^bytes length-header)
+         (.put ^ByteBuffer buffer ^bytes length-header)
          (write-ascii buffer (str len))
          (write-crlf buffer)
          (write-crlf buffer)
          (run-writer (bytes-writer body 0 len) socket buffer)))
-     (when (close-connection? request)
-       (tcp/close socket)))})
+     (callback))})
 
 (extend-protocol ResponseBody
   String
-  (write-body-to-socket [body response request headers buffer socket async?]
+  (write-body-to-socket [body response headers buffer socket async? callback]
     (let [^String charset (content-charset headers)
           body-bytes      (.getBytes body (or charset "UTF-8"))]
       (write-body-to-socket
-       body-bytes request response headers buffer socket async?)))
+       body-bytes response headers buffer socket async? callback)))
   Object
-  (write-body-to-socket [body response request headers buffer socket async?]
+  (write-body-to-socket [body response headers buffer socket async? callback]
     (when (and (nil? (headers "transfer-encoding"))
                (nil? (headers "content-length")))
       (.put ^ByteBuffer buffer ^bytes chunked-header))
     (write-crlf buffer)
     (.flip ^ByteBuffer buffer)
     (tcp/write socket buffer)
-    (let [out (if (close-connection? request)
-                (stream/socket->output-stream socket)
-                (stream/socket->output-stream socket {:on-close (fn [_])}))
+    (let [out (stream/socket->output-stream socket
+                                            {:on-close (fn [_] (callback))})
           out (if (chunked-response? headers)
                 (chunked-output-stream out)
                 (limited-output-stream out (content-length headers) socket))]
@@ -193,7 +192,7 @@
              (when-not async? (.close out))))))
   nil
   (write-body-to-socket
-    [_body _resp request headers ^ByteBuffer buffer socket _async?]
+    [_body _response headers ^ByteBuffer buffer socket _async? callback]
     (cond
       (headers "content-length")
       (do (write-crlf buffer)
@@ -206,8 +205,7 @@
       :else
       (do (.put buffer ^bytes zero-length-header)
           (tcp/write socket (.flip buffer))))
-    (when (close-connection? request)
-      (tcp/close socket))))
+    (callback)))
 
 (defn- rfc-1123-date-time []
   (.format (ZonedDateTime/now ZoneOffset/UTC)
@@ -266,8 +264,9 @@
             headers (lowercase-headers headers)]
         (.clear ^ByteBuffer buffer)
         (write-response-head buffer request response)
-        (write-body-to-socket
-         body request response headers buffer socket async?)))))
+        (write-body-to-socket body response headers buffer socket async?
+                              #(when (close-connection? request)
+                                 (tcp/close socket)))))))
 
 (defn- ring-raiser [request respond {:keys [error-handler error-logger]}]
   (fn [exception]
