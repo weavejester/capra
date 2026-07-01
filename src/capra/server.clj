@@ -40,14 +40,19 @@
 
 (defn- parse-start-line [state ^ByteBuffer buffer max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
-    (let [space1 (str/index-of line \space)
-          space2 (str/index-of line \space (inc space1))]
-      (assoc! state
-              ::step          :headers
-              :request-method (keyword (str/lower-case (subs line 0 space1)))
-              :uri            (subs line (inc space1) space2)
-              :protocol       (subs line (inc space2))
-              :headers        (transient {})))
+    (let [space1   (str/index-of line \space)
+          space2   (str/index-of line \space (inc space1))
+          protocol (subs line (inc space2))]
+      (if (or (= protocol "HTTP/1.1") (= protocol "HTTP/1.0"))
+        (assoc! state
+                ::step          :headers
+                :request-method (keyword (str/lower-case (subs line 0 space1)))
+                :uri            (subs line (inc space1) space2)
+                :protocol       protocol
+                :headers        (transient {}))
+        {::step    :error
+         ::error   :http-version-not-supported
+         ::request {:bad-protocol protocol}}))
     (when-not (< (.limit buffer) max-buffer-size)
       {::step :error, ::error :uri-too-long})))
 

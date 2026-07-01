@@ -26,6 +26,13 @@
     {:status  400
      :headers {"Connection" "close"
                "Content-Type" "text/plain; charset=UTF-8"}
-     :body    "Missing \"Host\" header in request."})})
+     :body    "Missing \"Host\" header in request."})
+   :http-version-not-supported
+   (fn [{:keys [bad-protocol]}]
+     {:status  505
+      :headers {"Connection" "close"
+                "Content-Type" "text/plain; charset=UTF-8"}
+      :body    (str "Unsupported HTTP version: \"" bad-protocol "\".\n"
+                    "Only \"HTTP/1.0\" and \"HTTP/1.1\" supported.")})})
 
 

@@ -407,3 +407,24 @@
                   "Content-Length: 33\r\n\r\n"
                   "Missing \"Host\" header in request.")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest unsupported-http-version-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4341})]
+    (let [response (raw-http-request
+                    "localhost" 4341
+                    (str "GET / HTTP/0.9\r\n"
+                         "Host: localhost\r\n"
+                         "Connection: close\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 505 HTTP Version Not Supported\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 79\r\n\r\n"
+                  "Unsupported HTTP version: \"HTTP/0.9\".\n"
+                  "Only \"HTTP/1.0\" and \"HTTP/1.1\" supported.")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))
