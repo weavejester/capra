@@ -366,3 +366,25 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest too-large-header-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4340
+                  :read-buffer-size 200})]
+    (let [long-header (apply str (repeat 100 "foobar"))
+          response    (http/get "http://localhost:4340/"
+                                {:throw-exceptions false
+                                 :headers {"Long-Header" long-header}})]
+      (is (= {:status  431
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "31"
+                        "Server"         "Capra"}
+              :body    "Request header field too large."}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))

@@ -51,8 +51,8 @@
     (when-not (< (.limit buffer) max-buffer-size)
       {::step :error, ::error :uri-too-long})))
 
-(defn- parse-header [{:keys [headers] :as state} buffer]
-  (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
+(defn- parse-header [{:keys [headers] :as state} buffer max-buffer-size]
+  (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (if (= line "")
       (assoc! state
               ::step   :handler
@@ -61,7 +61,9 @@
         (->> (assoc! headers
                      (str/lower-case (subs line 0 colon-index))
                      (str/trim       (subs line (inc colon-index))))
-             (assoc! state :headers))))))
+             (assoc! state :headers))))
+    (when-not (< (.limit ^ByteBuffer buffer) max-buffer-size)
+      {::step :error, ::error :request-header-field-too-large})))
 
 (defn- write-ascii [^ByteBuffer buffer ^String s]
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
@@ -403,7 +405,7 @@
          (if-some [new-state
                    (case (::step state)
                      :start-line (parse-start-line state buffer max-buf-size)
-                     :headers    (parse-header state buffer)
+                     :headers    (parse-header state buffer max-buf-size)
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
                      :error      (write-error-response state socket opts)

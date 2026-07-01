@@ -36,6 +36,7 @@
    416 "Range Not Satisfiable"
    417 "Expectation Failed"
    426 "Upgrade Required"
+   431 "Request Header Fields Too Large"
    500 "Internal Server Error"
    501 "Not Implemented"
    502 "Bad Gateway"
