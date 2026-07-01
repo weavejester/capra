@@ -345,3 +345,24 @@
                   "Content-Length: 11\r\n\r\n"
                   "Hello World")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest too-long-uri-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4339
+                  :read-buffer-size 200})]
+    (let [long-uri (apply str (repeat 100 "foobar"))
+          response (http/get (str "http://localhost:4339/" long-uri)
+                             {:throw-exceptions false})]
+      (is (= {:status  414
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "13"
+                        "Server"         "Capra"}
+              :body    "URI too long."}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))

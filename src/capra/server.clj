@@ -38,8 +38,8 @@
                 :server-name (.getHostString local)
                 :remote-addr (.getHostString remote)})))
 
-(defn- parse-start-line [state buffer]
-  (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
+(defn- parse-start-line [state ^ByteBuffer buffer max-buffer-size]
+  (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (let [space1 (str/index-of line \space)
           space2 (str/index-of line \space (inc space1))]
       (assoc! state
@@ -47,7 +47,9 @@
               :request-method (keyword (str/lower-case (subs line 0 space1)))
               :uri            (subs line (inc space1) space2)
               :protocol       (subs line (inc space2))
-              :headers        (transient {})))))
+              :headers        (transient {})))
+    (when-not (< (.limit buffer) max-buffer-size)
+      {::step :error, ::error :uri-too-long})))
 
 (defn- parse-header [{:keys [headers] :as state} buffer]
   (when-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
@@ -212,7 +214,7 @@
 (defn- write-status-line
   [^ByteBuffer buffer {:keys [protocol]} {:keys [status]}]
   (doto buffer
-    (write-ascii protocol)
+    (write-ascii (or protocol "HTTP/1.1"))
     (.put (byte \space))
     (write-ascii (str status))
     (.put (byte \space))
@@ -388,6 +390,7 @@
 
 (defn- http-handler
   [handler {:keys [handler-executor body-buffer-size error-logger]
+            max-buf-size :read-buffer-size
             :as   options}]
   (let [opts (assoc options
                     :executor         handler-executor
@@ -399,7 +402,7 @@
        (loop [state state]
          (if-some [new-state
                    (case (::step state)
-                     :start-line (parse-start-line state buffer)
+                     :start-line (parse-start-line state buffer max-buf-size)
                      :headers    (parse-header state buffer)
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
@@ -438,6 +441,7 @@
 (defn- new-default-options []
   (let [executor (new-default-executor)]
     {:body-buffer-size     8192
+     :read-buffer-size     8192
      :response-buffer-size 32768
      :error-handler        default-error-handler
      :error-logger         default-error-logger
