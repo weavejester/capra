@@ -20,6 +20,12 @@
     {:status  431
      :headers {"Connection" "close"
                "Content-Type" "text/plain; charset=UTF-8"}
-     :body    "Request header field too large."})})
+     :body    "Request header field too large."})
+   :missing-host-header
+   (constantly
+    {:status  400
+     :headers {"Connection" "close"
+               "Content-Type" "text/plain; charset=UTF-8"}
+     :body    "Missing \"Host\" header in request."})})
 
 

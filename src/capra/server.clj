@@ -294,6 +294,9 @@
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
 
+(defn- missing-host-header? [{:keys [protocol headers]}]
+  (and (= protocol "HTTP/1.1") (not (contains? headers "host"))))
+
 (defn- ring->stream-handler [ring-handler request opts]
   (stream/input-stream-handler
    (fn [in socket]
@@ -328,11 +331,15 @@
        (not (contains? headers "transfer-encoding"))))
 
 (defn- run-ring-handler [ring-handler request socket opts]
-  (if (not (valid-transfer-encoding? request))
+  (cond
+    (not (valid-transfer-encoding? request))
     {::step :error, ::error :unsupported-transfer-encoding, ::request request}
-    (if (empty-request-body? request)
-      (run-simple-handler ring-handler request socket opts)
-      (run-streaming-handler ring-handler request socket opts))))
+    (missing-host-header? request)
+    {::step :error, ::error :missing-host-header, ::request request}
+    (empty-request-body? request)
+    (run-simple-handler ring-handler request socket opts)
+    :else
+    (run-streaming-handler ring-handler request socket opts)))
 
 (defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
