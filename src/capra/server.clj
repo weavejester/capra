@@ -265,10 +265,10 @@
 (defn- request-close? [{:keys [protocol] {:strs [connection]} :headers}]
   (if (nil? connection)
     (= protocol "HTTP/1.0")
-    (re-find re-close-connection connection)))
+    (.find (re-matcher re-close-connection connection))))
 
 (defn- response-close? [{:strs [connection]}]
-  (when connection (re-find re-close-connection connection)))
+  (when connection (.find (re-matcher re-close-connection connection))))
 
 (defn- ring-responder [request socket handled {buf-size :response-buffer-size}]
   (fn respond [{:keys [headers body] :as response} async?]
@@ -456,6 +456,13 @@
 
 (comment
   (require '[criterium.core :as c])
+
+  (defn re-find-fast [^java.util.regex.Pattern re s]
+    (.find (re-matcher re s)))
+
+  (re-find-fast #"aa" "abb")
+
+  (c/quick-bench (re-find-fast #"aa" "baab"))
 
   (defn- write-response-head-1
     [^ByteBuffer buffer request {:keys [headers] :as response} lc-headers]
