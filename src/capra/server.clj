@@ -51,17 +51,17 @@
     (when-not (< (.limit buffer) max-buffer-size)
       {::step :error, ::error :uri-too-long})))
 
+(defn- assoc-header! [headers line]
+  (let [colon-index (str/index-of line \:)]
+    (assoc! headers
+            (str/lower-case (subs line 0 colon-index))
+            (str/trim       (subs line (inc colon-index))))))
+
 (defn- parse-header [{:keys [headers] :as state} buffer max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (if (= line "")
-      (assoc! state
-              ::step   :handler
-              :headers (persistent! headers))
-      (let [colon-index (str/index-of line \:)]
-        (->> (assoc! headers
-                     (str/lower-case (subs line 0 colon-index))
-                     (str/trim       (subs line (inc colon-index))))
-             (assoc! state :headers))))
+      (assoc! state ::step :handler, :headers (persistent! headers))
+      (assoc! state :headers (assoc-header! headers line)))
     (when-not (< (.limit ^ByteBuffer buffer) max-buffer-size)
       {::step :error, ::error :request-header-field-too-large})))
 
