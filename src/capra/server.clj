@@ -18,6 +18,7 @@
 (defn- ascii-bytes ^bytes [^String s]
   (.getBytes s StandardCharsets/US_ASCII))
 
+(def ^:private http-1-1         (ascii-bytes "HTTP/1.1 "))
 (def ^:private empty-chunk      (ascii-bytes "0\r\n\r\n"))
 (def ^:private server-header    (ascii-bytes "Server: Capra\r\n"))
 (def ^:private chunked-header   (ascii-bytes "Transfer-Encoding: chunked\r\n"))
@@ -25,7 +26,6 @@
 (def ^:private zero-length-header (ascii-bytes "Content-Length: 0\r\n\r\n"))
 (def ^:private date-header      (ascii-bytes "Date: "))
 (def ^:private close-header     (ascii-bytes "Connection: close\r\n"))
-(def ^:private keepalive-header (ascii-bytes "Connection: keep-alive\r\n"))
 (def ^:private crlf             (ascii-bytes "\r\n"))
 
 (defn- init-request [socket]
@@ -53,7 +53,7 @@
 (defn- read-start-line [state ^ByteBuffer buffer max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (let [{:keys [protocol] :as state} (parse-start-line state line)]
-      (if (or (nil? protocol) (= protocol "HTTP/1.1") (= protocol "HTTP/1.0"))
+      (if (or (nil? protocol) (= protocol "HTTP/1.1"))
         state
         {::step    :error
          ::error   :http-version-not-supported
@@ -228,10 +228,9 @@
            DateTimeFormatter/RFC_1123_DATE_TIME))
 
 (defn- write-status-line
-  [^ByteBuffer buffer {:keys [protocol]} {:keys [status]}]
+  [^ByteBuffer buffer {:keys [status]}]
   (doto buffer
-    (write-ascii (or protocol "HTTP/1.1"))
-    (.put (byte \space))
+    (.put ^bytes http-1-1)
     (write-ascii (str status))
     (.put (byte \space))
     (write-ascii (reason/status->reason status))
@@ -252,14 +251,13 @@
   (write-ascii buffer (rfc-1123-date-time))
   (write-crlf buffer))
 
-(defn- write-conn-header [^ByteBuffer buffer {:keys [protocol]} close?]
-  (when (not= (boolean close?) (= protocol "HTTP/1.0"))
-    (.put buffer (if close? ^bytes close-header ^bytes keepalive-header))))
+(defn- write-conn-header [^ByteBuffer buffer close?]
+  (when close? (.put buffer ^bytes close-header)))
 
 (defn- write-response-head
-  [^ByteBuffer buffer request {:keys [headers] :as response} lc-headers close?]
-  (write-status-line buffer request response)
-  (when-not (lc-headers "connection") (write-conn-header buffer request close?))
+  [^ByteBuffer buffer {:keys [headers] :as response} lc-headers close?]
+  (write-status-line buffer response)
+  (when-not (lc-headers "connection") (write-conn-header buffer close?))
   (when-not (lc-headers "date")       (write-date-header buffer))
   (when-not (lc-headers "server")     (.put buffer ^bytes server-header))
   (doseq [kv headers]
@@ -280,12 +278,7 @@
 
 (def ^:private re-close-connection #"(?i)(^| *,)close( *,|$)")
 
-(defn- request-close? [{:keys [protocol] {:strs [connection]} :headers}]
-  (if (nil? connection)
-    (= protocol "HTTP/1.0")
-    (.find (re-matcher re-close-connection connection))))
-
-(defn- response-close? [{:strs [connection]}]
+(defn- connection-close? [{:strs [connection]}]
   (when connection (.find (re-matcher re-close-connection connection))))
 
 (defn- ring-responder [request socket handled {buf-size :response-buffer-size}]
@@ -293,11 +286,11 @@
     (when (compare-and-set! handled false true)
       (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
             headers (lowercase-headers headers)
-            close?  (request-close? request)]
+            close?  (connection-close? (:headers request))]
         (.clear ^ByteBuffer buffer)
-        (write-response-head buffer request response headers close?)
+        (write-response-head buffer response headers close?)
         (write-body-to-socket body response headers buffer socket async?
-                              #(when (or close? (response-close? headers))
+                              #(when (or close? (connection-close? headers))
                                  (tcp/close socket)))))))
 
 (defn- ring-raiser [request respond {:keys [error-handler error-logger]}]
@@ -307,9 +300,6 @@
 
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
-
-(defn- missing-host-header? [{:keys [protocol headers]}]
-  (and (= protocol "HTTP/1.1") (not (contains? headers "host"))))
 
 (defn- ring->stream-handler [ring-handler request opts]
   (stream/input-stream-handler
@@ -348,7 +338,7 @@
   (cond
     (not (valid-transfer-encoding? request))
     {::step :error, ::error :unsupported-transfer-encoding, ::request request}
-    (missing-host-header? request)
+    (not (contains? (:headers request) "host"))
     {::step :error, ::error :missing-host-header, ::request request}
     (empty-request-body? request)
     (run-simple-handler ring-handler request socket opts)

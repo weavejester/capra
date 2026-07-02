@@ -22,7 +22,7 @@
    (fn [{:keys [bad-protocol]}]
      (plaintext-response
       505 (str "Unsupported HTTP version: \"" bad-protocol
-               "\".\nOnly \"HTTP/1.0\" and \"HTTP/1.1\" supported.")))
+               "\".\nOnly \"HTTP/1.1\" is supported.")))
    :invalid-request-start-line
    (constantly (plaintext-response 400 "Invalid HTTP request start line."))
    :invalid-request-header
