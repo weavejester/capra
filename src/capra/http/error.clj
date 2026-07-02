@@ -39,6 +39,12 @@
     {:status  400
      :headers {"Connection" "close"
                "Content-Type" "text/plain; charset=UTF-8"}
-     :body    "Invalid HTTP request start line."})}) 
+     :body    "Invalid HTTP request start line."})
+   :invalid-request-header
+   (fn [{:keys [bad-header]}]
+     {:status  400
+      :headers {"Connection" "close"
+                "Content-Type" "text/plain; charset=UTF-8"}
+      :body    (str "Invalid HTTP request header line: \"" bad-header "\".")})})
 
 
