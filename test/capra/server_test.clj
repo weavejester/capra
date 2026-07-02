@@ -486,7 +486,7 @@
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
 
-(deftest multiple-headers-test
+(deftest multiple-request-headers-test
   (with-open [_ (capra/start-server
                  (fn handler [{{:strs [test-header]} :headers}]
                    {:status  200
@@ -498,10 +498,30 @@
       (is (= {:status  200
               :headers {"Connection"     "close"
                         "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "17"
+                        "Content-Length" "15"
                         "Server"         "Capra"}
-              :body    "\"One, Two, Three\""}
+              :body    "\"One,Two,Three\""}
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
 
+(deftest multiple-connection-headers-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Connection" ["close" "Transport-Encoding"]
+                              "Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4344})]
+    (let [response (raw-http-request
+                    "localhost" 4344
+                    (str "GET / HTTP/1.1\r\n"
+                         "Host: localhost\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 200 OK\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Connection: Transport-Encoding\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 11\r\n\r\n"
+                  "Hello World")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))

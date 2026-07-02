@@ -61,16 +61,16 @@
     (when-not (< (.limit buffer) max-buffer-size)
       {::step :error, ::error :uri-too-long})))
 
-(defn- assoc-header! [headers name value]
+(defn- assoc-request-header! [headers name value]
   (if-some [existing-val (headers name)]
-    (assoc! headers name (str existing-val ", " value))
+    (assoc! headers name (str existing-val "," value))
     (assoc! headers name value)))
 
 (defn- parse-header [{:keys [headers] :as state} line]
   (if-some [colon-index (str/index-of line \:)]
     (let [name  (str/lower-case (subs line 0 colon-index))
           value (str/trim (subs line (inc colon-index)))]
-      (assoc! state :headers (assoc-header! headers name value)))
+      (assoc! state :headers (assoc-request-header! headers name value)))
     {::step    :error
      ::error   :invalid-request-header
      ::request {:bad-header line}}))
@@ -298,9 +298,13 @@
 
 (def ^:private response-buffer (ThreadLocal.))
 
-(defn- lowercase-headers [headers]
-  (persistent! (reduce-kv (fn [m k v] (assoc! m (str/lower-case k) v))
-                          (transient {}) headers)))
+(defn- assoc-response-header! [headers name value]
+  (assoc! headers
+          (str/lower-case name)
+          (if (string? value) value (str/join "," value))))
+
+(defn- normalize-headers [headers]
+  (persistent! (reduce-kv assoc-response-header! (transient {}) headers)))
 
 (def ^:private re-close-connection #"(?i)(^| *,)close( *,|$)")
 
@@ -311,7 +315,7 @@
   (fn respond [{:keys [headers body] :as response} async?]
     (when (compare-and-set! handled false true)
       (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-            headers (lowercase-headers headers)
+            headers (normalize-headers headers)
             close?  (connection-close? (:headers request))]
         (.clear ^ByteBuffer buffer)
         (write-response-head buffer response headers close?)
