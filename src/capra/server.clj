@@ -6,9 +6,10 @@
             [teensyp.buffer :as buf]
             [teensyp.server :as tcp]
             [teensyp.stream :as stream])
-  (:import [java.io Closeable InputStream OutputStream]
+  (:import [java.io Closeable File FileInputStream InputStream OutputStream]
            [java.net InetSocketAddress]
            [java.nio ByteBuffer]
+           [java.nio.channels FileChannel]
            [java.nio.charset StandardCharsets]
            [java.time ZoneOffset ZonedDateTime]
            [java.time.format DateTimeFormatter]
@@ -143,6 +144,9 @@
   (let [read-buf (ByteBuffer/wrap bs off len)]
     (fn [write-buf] (copy-buffer read-buf write-buf))))
 
+(defn- file-writer [^FileChannel ch]
+  (fn [^ByteBuffer write-buf] (neg? (.read ch write-buf))))
+
 (defn- limit-buffer [f ^ByteBuffer buffer ^long new-limit]
   (let [limit (.limit buffer)]
     (.limit buffer new-limit)
@@ -172,13 +176,13 @@
               1 (writerf write-buf)
               2 (copy-buffer end write-buf))
         (> (vswap! index inc) 2)))))
-        
+
 (defn- write-known-length-to-socket [socket headers buffer writerf len callback]
   (cond
     (headers "content-length")
     (let [content-len (content-length headers)]
       (write-crlf buffer)
-      (cond 
+      (cond
         (= content-len len)
         (run-writer writerf socket buffer callback)
         (< content-len len)
@@ -215,6 +219,11 @@
           body-bytes      (.getBytes body (or charset "UTF-8"))]
       (write-body-to-socket body-bytes response headers
                             buffer socket async? callback)))
+  File
+  (write-body-to-socket [body _response headers buffer socket _async? callback]
+    (let [file-ch (.getChannel (FileInputStream. body))]
+      (write-known-length-to-socket socket headers buffer (file-writer file-ch)
+                                    (.size file-ch) callback)))
   Object
   (write-body-to-socket [body response headers buffer socket async? callback]
     (when (and (nil? (headers "transfer-encoding"))

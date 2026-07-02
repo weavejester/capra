@@ -467,3 +467,21 @@
                   "Content-Length: 50\r\n\r\n"
                   "Invalid HTTP request header line: \"InvalidHeader\".")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest file-response-body-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (io/file "test/capra/test_file.txt")})
+                 {:port 4342})]
+    (let [response (http/get "http://localhost:4342")]
+      (is (= {:status  200
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "12"
+                        "Server"         "Capra"}
+              :body    "Hello World\n"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))
