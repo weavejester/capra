@@ -485,3 +485,23 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest multiple-headers-test
+  (with-open [_ (capra/start-server
+                 (fn handler [{{:strs [test-header]} :headers}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (pr-str test-header)})
+                 {:port 4343})]
+    (let [response (http/get "http://localhost:4343/"
+                             {:headers {"Test-Header" ["One" "Two" "Three"]}})]
+      (is (= {:status  200
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "17"
+                        "Server"         "Capra"}
+              :body    "\"One, Two, Three\""}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))
+

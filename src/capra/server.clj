@@ -61,12 +61,16 @@
     (when-not (< (.limit buffer) max-buffer-size)
       {::step :error, ::error :uri-too-long})))
 
+(defn- assoc-header! [headers name value]
+  (if-some [existing-val (headers name)]
+    (assoc! headers name (str existing-val ", " value))
+    (assoc! headers name value)))
+
 (defn- parse-header [{:keys [headers] :as state} line]
   (if-some [colon-index (str/index-of line \:)]
-    (assoc! state :headers
-            (assoc! headers
-                    (str/lower-case (subs line 0 colon-index))
-                    (str/trim       (subs line (inc colon-index)))))
+    (let [name  (str/lower-case (subs line 0 colon-index))
+          value (str/trim (subs line (inc colon-index)))]
+      (assoc! state :headers (assoc-header! headers name value)))
     {::step    :error
      ::error   :invalid-request-header
      ::request {:bad-header line}}))
