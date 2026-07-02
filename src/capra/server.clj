@@ -18,15 +18,14 @@
 (defn- ascii-bytes ^bytes [^String s]
   (.getBytes s StandardCharsets/US_ASCII))
 
-(def ^:private http-1-1         (ascii-bytes "HTTP/1.1 "))
-(def ^:private empty-chunk      (ascii-bytes "0\r\n\r\n"))
-(def ^:private server-header    (ascii-bytes "Server: Capra\r\n"))
-(def ^:private chunked-header   (ascii-bytes "Transfer-Encoding: chunked\r\n"))
-(def ^:private length-header      (ascii-bytes "Content-Length: "))
-(def ^:private zero-length-header (ascii-bytes "Content-Length: 0\r\n\r\n"))
-(def ^:private date-header      (ascii-bytes "Date: "))
-(def ^:private close-header     (ascii-bytes "Connection: close\r\n"))
-(def ^:private crlf             (ascii-bytes "\r\n"))
+(def ^:private http-1-1       (ascii-bytes "HTTP/1.1 "))
+(def ^:private empty-chunk    (ascii-bytes "0\r\n\r\n"))
+(def ^:private server-header  (ascii-bytes "Server: Capra\r\n"))
+(def ^:private chunked-header (ascii-bytes "Transfer-Encoding: chunked\r\n"))
+(def ^:private length-header  (ascii-bytes "Content-Length: "))
+(def ^:private date-header    (ascii-bytes "Date: "))
+(def ^:private close-header   (ascii-bytes "Connection: close\r\n"))
+(def ^:private crlf           (ascii-bytes "\r\n"))
 
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
@@ -129,67 +128,93 @@
   (when-let [m (re-find re-charset content-type)]
     (or (m 1) (m 2))))
 
-(defn- run-writer [writerf socket ^ByteBuffer buffer]
+(defn- run-writer [writerf socket ^ByteBuffer buffer callback]
   (if (writerf buffer)
-    (tcp/write socket (.flip buffer))
+    (do (tcp/write socket (.flip buffer))
+        (callback))
     (tcp/write socket (.flip buffer)
-               #(run-writer writerf socket (.clear buffer)))))
+               #(run-writer writerf socket (.clear buffer) callback))))
+
+(defn- copy-buffer [^ByteBuffer src dest]
+  (buf/copy src dest)
+  (not (.hasRemaining src)))
 
 (defn- bytes-writer [^bytes bs off len]
   (let [read-buf (ByteBuffer/wrap bs off len)]
-    (fn [write-buf]
-      (buf/copy read-buf write-buf)
-      (not (.hasRemaining read-buf)))))
+    (fn [write-buf] (copy-buffer read-buf write-buf))))
+
+(defn- limit-buffer [f ^ByteBuffer buffer ^long new-limit]
+  (let [limit (.limit buffer)]
+    (.limit buffer new-limit)
+    (try (f buffer) (finally (.limit buffer limit)))))
+
+(defn- limit-writer [writerf len]
+  (let [bytes-left (volatile! len)]
+    (fn [^ByteBuffer write-buf]
+      (let [^long len @bytes-left]
+        (or (not (pos? len))
+            (let [pos     (.position write-buf)
+                  done?   (if (< len (.remaining write-buf))
+                            (limit-buffer writerf write-buf (+ pos len))
+                            (writerf write-buf))
+                  written (- (.position write-buf) pos)]
+              (or done? (not (pos? (vreset! bytes-left (- len written)))))))))))
 
 (def ^:private end-chunk (ascii-bytes "\r\n0\r\n\r\n"))
 
-(defn- chunk-writer [^bytes bs off len]
-  (let [buffers [(ByteBuffer/wrap (ascii-bytes (format "%X\r\n" len)))
-                 (ByteBuffer/wrap bs off len)
-                 (ByteBuffer/wrap end-chunk)]
-        index   (volatile! 0)]
+(defn- chunk-writer [writerf len]
+  (let [header (ByteBuffer/wrap (ascii-bytes (format "%X\r\n" len)))
+        end    (ByteBuffer/wrap end-chunk)
+        index  (volatile! 0)]
     (fn [write-buf]
-      (let [read-buf ^ByteBuffer (buffers @index)]
-        (buf/copy read-buf write-buf)
-        (when-not (.hasRemaining read-buf)
-          (> (vswap! index inc) 2))))))
+      (when (case (long @index)
+              0 (copy-buffer header write-buf)
+              1 (writerf write-buf)
+              2 (copy-buffer end write-buf))
+        (> (vswap! index inc) 2)))))
+        
+(defn- write-known-length-to-socket [socket headers buffer writerf len callback]
+  (cond
+    (headers "content-length")
+    (let [content-len (content-length headers)]
+      (write-crlf buffer)
+      (cond 
+        (= content-len len)
+        (run-writer writerf socket buffer callback)
+        (< content-len len)
+        (run-writer (limit-writer writerf content-len) socket buffer callback)
+        :else
+        (do (run-writer writerf socket buffer callback)
+            (tcp/close socket))))
+    (chunked-transfer? headers)
+    (do (write-crlf buffer)
+        (run-writer (chunk-writer writerf len) socket buffer callback))
+    :else
+    (do (.put ^ByteBuffer buffer ^bytes length-header)
+        (write-ascii buffer (str len))
+        (write-crlf buffer)
+        (write-crlf buffer)
+        (run-writer writerf socket buffer callback))))
 
 (defprotocol ResponseBody
-  (write-body-to-socket
-    [body response headers buffer socket async? callback]))
+  (write-body-to-socket [body response headers buffer socket async? callback]))
 
 (extend (Class/forName "[B")
   ResponseBody
   {:write-body-to-socket
    (fn [^bytes body _response headers buffer socket _async? callback]
-     (cond
-       (headers "content-length")
-       (let [content-len (content-length headers)
-             body-len    (alength body)]
-         (write-crlf buffer)
-         (if (<= content-len body-len)
-           (run-writer (bytes-writer body 0 content-len) socket buffer)
-           (do (run-writer (bytes-writer body 0 body-len) socket buffer)
-               (tcp/close socket))))
-       (chunked-transfer? headers)
-       (do (write-crlf buffer)
-           (run-writer (chunk-writer body 0 (alength body)) socket buffer))
-       :else
-       (let [len (alength body)]
-         (.put ^ByteBuffer buffer ^bytes length-header)
-         (write-ascii buffer (str len))
-         (write-crlf buffer)
-         (write-crlf buffer)
-         (run-writer (bytes-writer body 0 len) socket buffer)))
-     (callback))})
+     (let [len     (alength body)
+           writerf (bytes-writer body 0 len)]
+       (write-known-length-to-socket socket headers buffer
+                                     writerf len callback)))})
 
 (extend-protocol ResponseBody
   String
   (write-body-to-socket [body response headers buffer socket async? callback]
     (let [^String charset (content-charset headers)
           body-bytes      (.getBytes body (or charset "UTF-8"))]
-      (write-body-to-socket
-       body-bytes response headers buffer socket async? callback)))
+      (write-body-to-socket body-bytes response headers
+                            buffer socket async? callback)))
   Object
   (write-body-to-socket [body response headers buffer socket async? callback]
     (when (and (nil? (headers "transfer-encoding"))
@@ -207,21 +232,9 @@
            (finally
              (when-not async? (.close out))))))
   nil
-  (write-body-to-socket
-    [_body _response headers ^ByteBuffer buffer socket _async? callback]
-    (cond
-      (headers "content-length")
-      (do (write-crlf buffer)
-          (tcp/write socket (.flip buffer))
-          (when-not (zero? (content-length headers))
-            (tcp/close socket)))
-      (chunked-transfer? headers)
-      (do (.put buffer ^bytes end-chunk)
-          (tcp/write socket (.flip buffer)))
-      :else
-      (do (.put buffer ^bytes zero-length-header)
-          (tcp/write socket (.flip buffer))))
-    (callback)))
+  (write-body-to-socket [_body _response headers buffer socket _async? callback]
+    (let [writerf (constantly true)]
+      (write-known-length-to-socket socket headers buffer writerf 0 callback))))
 
 (defn- rfc-1123-date-time []
   (.format (ZonedDateTime/now ZoneOffset/UTC)
