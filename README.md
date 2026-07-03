@@ -1,6 +1,15 @@
 # Capra [![Build Status](https://github.com/weavejester/capra/actions/workflows/test.yml/badge.svg)](https://github.com/weavejester/capra/actions/workflows/test.yml)
 
-TODO
+Capra is a Correct and Adequantly Performant [Ring][] Adapter. It's
+written entirely in Clojure and depends only on [TeensyP][], a TCP
+server that's also written in Clojure.
+
+Capra supports HTTP/1.1 only and will not support older versions.
+WebSocket support is planned in the near future. HTTP/2 support is
+planned after that.
+
+[Ring]: https://github.com/ring-clojure/ring
+[TeensyP]: https://github.com/weavejester/teensyp
 
 ## Installation
 
