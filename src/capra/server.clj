@@ -501,7 +501,7 @@
      :handler-executor     executor
      :socket-executor      executor}))
 
-(defn start-server ^Closeable [handler options]
+(defn run-server ^Closeable [handler options]
   (let [handler-opts (merge (new-default-options) options)
         handler      (if (:async? handler-opts)
                        (async-handler handler)
@@ -521,6 +521,6 @@
      :headers {"Content-Type" "text/plain; charset=UTF-8"}
      :body    "Hello World"})
 
-  (def capra-server (start-server simple-handler {:port 6201}))
+  (def capra-server (run-server simple-handler {:port 6201}))
 
   (.close capra-server))

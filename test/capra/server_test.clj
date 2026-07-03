@@ -18,7 +18,7 @@
     (.formatHex (java.util.HexFormat/of) (.digest digest bs))))
 
 (deftest request-response-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -38,7 +38,7 @@
                       (get-in response [:headers "Date"]))))))
 
 (deftest response-content-length-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type"   "text/plain"
@@ -57,7 +57,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest request-with-content-length-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [{:keys [headers body]}]
                    {:status  200
                     :headers {"Content-Type"   (headers "content-type")
@@ -78,7 +78,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest multiple-response-headers-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"
@@ -94,7 +94,7 @@
              (-> response :headers (dissoc "Date")))))))
 
 (deftest byte-array-response-body-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -113,7 +113,7 @@
 
 (deftest large-byte-array-response-body-test
   (let [large-body (apply str (repeat 100 "Hello World\n"))]
-    (with-open [_ (capra/start-server
+    (with-open [_ (capra/run-server
                    (fn handler [_request]
                      {:status  200
                       :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -133,7 +133,7 @@
 
 (deftest large-chunked-array-response-body-test
   (let [large-body (apply str (repeat 100 "Hello World\n"))]
-    (with-open [_ (capra/start-server
+    (with-open [_ (capra/run-server
                    (fn handler [_request]
                      {:status  200
                       :headers {"Content-Type" "text/plain; charset=UTF-8"
@@ -153,7 +153,7 @@
                    (update :headers dissoc "Date"))))))))
 
 (deftest persistent-connection-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -175,7 +175,7 @@
                (first responses)))))))
 
 (deftest respond-multiple-calls-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request respond _raise]
                    (respond
                     {:status  200
@@ -200,7 +200,7 @@
 
 (deftest exception-in-handler-test
   (let [logs (atom [])]
-    (with-open [_ (capra/start-server
+    (with-open [_ (capra/run-server
                    (fn handler [_request]
                      (throw (ex-info "Error" {})))
                    {:port 4330
@@ -219,7 +219,7 @@
         (is (= ["Error"] @logs))))))
 
 (deftest nil-response-body-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  301
                     :headers {"Location" "http://example.com"}})
@@ -237,7 +237,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest bad-user-content-length-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type"   "text/plain; charset=UTF-8"
@@ -255,7 +255,7 @@
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))
           "Shorter Content-Length cuts off body")))
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type"   "text/plain; charset=UTF-8"
@@ -274,7 +274,7 @@
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))
           "Shorter Content-Length cuts off body")))
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type"   "text/plain; charset=UTF-8"
@@ -285,7 +285,7 @@
                           #"Premature end of Content-Length"
                           (http/get "http://localhost:4334"))
         "Longer Content-Length immediately closes"))
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type"   "text/plain; charset=UTF-8"
@@ -297,7 +297,7 @@
                           #"Premature end of Content-Length"
                           (http/get "http://localhost:4335"))
         "Longer Content-Length immediately closes"))
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Length" "1"}})
@@ -308,7 +308,7 @@
         "Longer Content-Length immediately closes")))
 
 (deftest unsupported-transfer-encoding-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -331,7 +331,7 @@
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest client-connection-close-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -351,7 +351,7 @@
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest too-long-uri-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -372,7 +372,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest too-large-header-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -394,7 +394,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest missing-host-header-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -413,7 +413,7 @@
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest unsupported-http-version-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -434,7 +434,7 @@
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest invalid-request-start-line-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -452,7 +452,7 @@
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest invalid-request-header-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -473,7 +473,7 @@
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest file-response-body-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -491,7 +491,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest multiple-request-headers-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [{{:strs [test-header]} :headers}]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -510,7 +510,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest multiple-connection-headers-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Connection" ["close" "Transport-Encoding"]
@@ -531,7 +531,7 @@
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest input-stream-response-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
@@ -550,7 +550,7 @@
                  (update :headers dissoc "Date")))))))
 
 (deftest large-file-response-body-test
-  (with-open [_ (capra/start-server
+  (with-open [_ (capra/run-server
                  (fn handler [_request]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
