@@ -1,15 +1,12 @@
 # Capra [![Build Status](https://github.com/weavejester/capra/actions/workflows/test.yml/badge.svg)](https://github.com/weavejester/capra/actions/workflows/test.yml)
 
-Capra is a Correct and Adequantly Performant [Ring][] Adapter. It's
-written entirely in Clojure and depends only on [TeensyP][], a TCP
-server that's also written in Clojure.
+Capra is a Correct and Adequantly Performant [Ring][] Adapter.
 
 Capra supports HTTP/1.1 only and will not support older versions.
 WebSocket support is planned in the near future. HTTP/2 support is
 planned after that.
 
-[Ring]: https://github.com/ring-clojure/ring
-[TeensyP]: https://github.com/weavejester/teensyp
+[ring]: https://github.com/ring-clojure/ring
 
 ## Installation
 
@@ -20,6 +17,29 @@ Add the following dependency to your deps.edn file:
 Or to your Leiningen project file:
 
     [dev.weavejester/capra "0.1.0-SNAPSHOT"]
+
+## Rationale
+
+There are a number of web servers for Clojure, but all of them are
+written in Java; either because they are wrappers around existing Java
+web servers, such as the [Ring Jetty Adapter][], or because they are
+heavily optimized, such as [http-kit][].
+
+Capra is written entirely in Clojure, and has only one dependency,
+[TeensyP][], which is also entirely[^1] written in Clojure. This has
+several advantages:
+
+1. It avoids the limitations and performance hit of wrapping Servlets.
+2. It can be more easily ported to Clojure-like environments that don't
+   use the JVM.
+3. It can be used as a platform to experiment with future Ring features.
+
+[^1]: Excepting a couple of interfaces that are used to avoid using
+`proxy` when creating custom `InputStream` and `OutputStream` classes.
+
+[ring jetty adapter]: https://ring-clojure.github.io/ring/ring.adapter.jetty.html
+[http-kit]: https://github.com/http-kit/http-kit
+[teensyp]: https://github.com/weavejester/teensyp
 
 ## Usage
 
