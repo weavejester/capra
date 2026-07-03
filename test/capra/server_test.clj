@@ -13,6 +13,10 @@
     (.flush writer)
     (slurp (.getInputStream socket) :encoding "US-ASCII")))
 
+(defn- sha256sum [^bytes bs]
+  (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
+    (.formatHex (java.util.HexFormat/of) (.digest digest bs))))
+
 (deftest request-response-test
   (with-open [_ (capra/start-server
                  (fn handler [_request]
@@ -544,3 +548,23 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest large-file-response-body-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (io/file "test/capra/test_image.jpg")})
+                 {:port 4346})]
+    (let [response (http/get "http://localhost:4346"
+                             {:as :byte-array})]
+      (is (= {:status  200
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "707328"
+                        "Server"         "Capra"}}
+             (-> response
+                 (select-keys [:status :headers])
+                 (update :headers dissoc "Date"))))
+      (is (= "af779e68245bad2adc3e2537103b7a898e2a068d5ebbee5c30ef0b217a1c8199"
+             (sha256sum (:body response)))))))
