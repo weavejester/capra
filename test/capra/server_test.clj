@@ -525,3 +525,22 @@
                   "Content-Length: 11\r\n\r\n"
                   "Hello World")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest input-stream-response-test
+  (with-open [_ (capra/start-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (java.io.ByteArrayInputStream.
+                              (.getBytes "Hello World" "UTF-8"))})
+                 {:port 4345})]
+    (let [response (http/get "http://localhost:4345")]
+      (is (= {:status  200
+              :headers {"Connection"        ["close" "Transfer-Encoding"]
+                        "Content-Type"      "text/plain; charset=UTF-8"
+                        "Transfer-Encoding" "chunked"
+                        "Server"            "Capra"}
+              :body    "Hello World"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))

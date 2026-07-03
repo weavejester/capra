@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [ring.core.protocols :as ring]
             [teensyp.buffer :as buf]
+            [teensyp.concurrent :refer [with-lock]]
             [teensyp.server :as tcp]
             [teensyp.stream :as stream])
   (:import [java.io Closeable File FileInputStream InputStream OutputStream]
@@ -14,7 +15,8 @@
            [java.time ZoneOffset ZonedDateTime]
            [java.time.format DateTimeFormatter]
            [java.util.concurrent Executors]
-           [java.util.concurrent.atomic AtomicInteger]))
+           [java.util.concurrent.atomic AtomicInteger]
+           [java.util.concurrent.locks ReentrantLock]))
 
 (defn- ascii-bytes ^bytes [^String s]
   (.getBytes s StandardCharsets/US_ASCII))
@@ -22,11 +24,13 @@
 (def ^:private http-1-1       (ascii-bytes "HTTP/1.1 "))
 (def ^:private empty-chunk    (ascii-bytes "0\r\n\r\n"))
 (def ^:private server-header  (ascii-bytes "Server: Capra\r\n"))
-(def ^:private chunked-header (ascii-bytes "Transfer-Encoding: chunked\r\n"))
 (def ^:private length-header  (ascii-bytes "Content-Length: "))
 (def ^:private date-header    (ascii-bytes "Date: "))
 (def ^:private close-header   (ascii-bytes "Connection: close\r\n"))
 (def ^:private crlf           (ascii-bytes "\r\n"))
+(def ^:private chunked-header
+  (ascii-bytes (str "Transfer-Encoding: chunked\r\n"
+                    "Connection: Transfer-Encoding\r\n")))
 
 (defn- init-request [socket]
   (let [info   (tcp/socket-info socket)
@@ -91,15 +95,21 @@
   (.put buffer (byte \newline)))
 
 (defn- chunked-output-stream ^OutputStream [^OutputStream out]
-  (stream/output-stream
-   (fn write [^bytes b off len]
-     (let [header (ascii-bytes (format "%X\r\n" len))]
-       (.write out header)
-       (.write out b off len)
-       (.write out ^bytes crlf)))
-   (fn close []
-     (.write out ^bytes empty-chunk)
-     (.close out))))
+  (let [lock   (ReentrantLock.)
+        closed (volatile! false)]
+    (stream/output-stream
+     (fn write [^bytes b off len]
+       (let [header (ascii-bytes (format "%X\r\n" len))]
+         (with-lock lock
+           (.write out header)
+           (.write out b off len)
+           (.write out ^bytes crlf))))
+     (fn close []
+       (with-lock lock
+         (when-not @closed
+           (vreset! closed true)
+           (.write out ^bytes empty-chunk)
+           (.close out)))))))
 
 (defn- limited-output-stream ^OutputStream [^OutputStream out limit socket]
   (let [limit (AtomicInteger. limit)]
@@ -504,58 +514,13 @@
 (comment
   (require '[criterium.core :as c])
 
-  (defn re-find-fast [^java.util.regex.Pattern re s]
-    (.find (re-matcher re s)))
-
-  (re-find-fast #"aa" "abb")
-
-  (c/quick-bench (re-find-fast #"aa" "baab"))
-
-  (defn- write-response-head-1
-    [^ByteBuffer buffer request {:keys [headers] :as response} lc-headers]
-    (write-status-line buffer request response)
-    (when-not (lc-headers "date")
-      (write-date-header buffer))
-    (when-not (lc-headers "server")
-      (.put buffer ^bytes server-header))
-    (doseq [kv headers]
-      (let [value (val kv)]
-        (if (vector? value)
-          (doseq [v value] (write-header buffer (key kv) v))
-          (write-header buffer (key kv) value)))))
-
-  (defn- write-response-head-2
-    [^ByteBuffer buffer request {:keys [headers] :as response} lc-headers]
-    (write-status-line buffer request response)
-    (let [headers (cond-> headers
-                    (not (lc-headers "date"))
-                    (assoc "Date" (rfc-1123-date-time))
-                    (not (lc-headers "server"))
-                    (assoc "Server" "Capra"))]
-      (doseq [kv headers]
-        (let [value (val kv)]
-          (if (vector? value)
-            (doseq [v value] (write-header buffer (key kv) v))
-            (write-header buffer (key kv) value))))))
-
-  (def request  {:protocol "HTTP/1.1"})
-  (def response {:status 200
-                 :headers {"Content-Type" "text/plain; charset=UTF-8"}})
-  (def buffer   (ByteBuffer/allocate 256))
-  (def headers  (lowercase-headers (:headers response)))
-
-  (c/quick-bench
-   (do (.clear ^ByteBuffer buffer)
-       (write-response-head-1 buffer request response headers)))
-
-  (require '[org.httpkit.server :as hk])
+  (c/quick-bench (+ 1 1))
 
   (defn simple-handler [_request]
     {:status  200
      :headers {"Content-Type" "text/plain; charset=UTF-8"}
      :body    "Hello World"})
 
-  (def capra-server   (start-server simple-handler {:port 6201}))
-  (def httpkit-server (hk/run-server simple-handler {:port 6202}))
+  (def capra-server (start-server simple-handler {:port 6201}))
 
   (.close capra-server))
