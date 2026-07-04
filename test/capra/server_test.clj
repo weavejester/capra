@@ -568,3 +568,20 @@
                  (update :headers dissoc "Date"))))
       (is (= "af779e68245bad2adc3e2537103b7a898e2a068d5ebbee5c30ef0b217a1c8199"
              (sha256sum (:body response)))))))
+
+(deftest run-server-options-test
+  (letfn [(handler [_request]
+            {:status  200
+             :headers {"Content-Type" "text/plain; charset=UTF-8"}
+             :body    "Hello World"})]
+    (with-open [_ (capra/run-server handler :port 4347)]
+      (let [response (http/get "http://localhost:4347")]
+        (is (= {:status  200
+                :headers {"Connection"     "close"
+                          "Content-Type"   "text/plain; charset=UTF-8"
+                          "Content-Length" "11"
+                          "Server"         "Capra"}
+                :body    "Hello World"}
+               (-> response
+                   (select-keys [:status :headers :body])
+                   (update :headers dissoc "Date"))))))))

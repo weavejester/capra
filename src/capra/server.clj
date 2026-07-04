@@ -525,7 +525,7 @@
     the request when streaming (defaults to 8K)
   - `:write-buffer-size` - the write buffer size in bytes (default 32K)
   - `:write-queue-size` - the max number of writes in the queue (default 64)"
-  ^Closeable [handler options]
+  ^Closeable [handler & {:as options}]
   (let [options (merge (new-default-options) options)
         handler (if (:async? options)
                   (async-handler handler)
