@@ -7,8 +7,9 @@ WebSocket support is planned in the near future. HTTP/2 support is
 planned after that.
 
 [^1]: 'Correct' because Capra aims to be a well-behaved HTTP server.
-[^2]: 'Adequately Performant' because Capra aims to be more performant
-than the [Ring Jetty Adapter][], the most commonly used adapter.
+[^2]: 'Adequately Performant' because Capra aims to be at least more
+performant than the [Ring Jetty Adapter][], the most commonly used
+adapter.
 
 [ring]: https://github.com/ring-clojure/ring
 
@@ -24,19 +25,21 @@ Or to your Leiningen project file:
 
 ## Rationale
 
-There are a number of web servers for Clojure, but all of them are
-written in Java; either because they are wrappers around existing Java
-web servers, such as the [Ring Jetty Adapter][], or because they are
-heavily optimized, such as [http-kit][].
+A number of web servers already exist for Clojure, but all of them are
+predominantly written in Java; either because they are wrappers around
+existing Java web servers, such as the [Ring Jetty Adapter][], or
+because they are heavily optimized, such as [http-kit][].
 
 Capra is written entirely in Clojure, and has only one dependency,
-[TeensyP][], which is also entirely[^3] written in Clojure. This has
+[TeensyP][], which is also written entirely[^3] in Clojure. This has
 several advantages:
 
-1. It avoids the limitations and performance hit of wrapping Servlets.
-2. It can be more easily ported to Clojure-like environments that don't
+1. The codebase is more concise, making it a flexible platform for
+   trying out experimental Ring features.
+2. It avoids the limitations and performance hit of wrapping an existing
+   Java API, such as Jetty.
+3. It can be more easily ported to Clojure-like environments that don't
    use the JVM.
-3. It can be used as a platform to experiment with future Ring features.
 
 [^3]: Excepting a couple of interfaces that are used to avoid using
 `proxy` when creating custom `InputStream` and `OutputStream` classes.
