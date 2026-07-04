@@ -442,12 +442,10 @@
     nil))
 
 (defn- http-handler
-  [handler {:keys [handler-executor body-buffer-size error-logger]
+  [handler {:keys [body-buffer-size error-logger]
             max-buf-size :read-buffer-size
             :as   options}]
-  (let [opts (assoc options
-                    :executor         handler-executor
-                    :read-buffer-size body-buffer-size)]
+  (let [opts (assoc options :read-buffer-size body-buffer-size)]
     (fn
       ([socket]
        (init-request socket))
@@ -498,8 +496,7 @@
      :response-buffer-size 32768
      :error-handler        default-error-handler
      :error-logger         default-error-logger
-     :handler-executor     executor
-     :socket-executor      executor}))
+     :executor             executor}))
 
 (defn run-server ^Closeable [handler options]
   (let [handler-opts (merge (new-default-options) options)
@@ -507,9 +504,7 @@
                        (async-handler handler)
                        (sync-handler handler))]
     (tcp/start-server
-     (-> options
-         (assoc :executor (:socket-executor options))
-         (assoc :handler (http-handler handler handler-opts))))))
+     (assoc options :handler (http-handler handler handler-opts)))))
 
 (comment
   (require '[criterium.core :as c])
