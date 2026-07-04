@@ -15,7 +15,7 @@
            [java.nio.charset StandardCharsets]
            [java.time ZoneOffset ZonedDateTime]
            [java.time.format DateTimeFormatter]
-           [java.util.concurrent Executors]
+           [java.util.concurrent ArrayBlockingQueue ThreadPoolExecutor TimeUnit]
            [java.util.concurrent.atomic AtomicInteger]
            [java.util.concurrent.locks ReentrantLock]))
 
@@ -487,8 +487,16 @@
 (defn- default-error-logger [exception]
   (locking *err* (binding [*out* *err*]) (prn exception)))
 
+(defn- maybe-virtual-thread-executor  []
+  (try (eval '(Executors/newVirtualThreadPerTaskExecutor))
+       (catch Throwable _ nil)))
+
 (defn- new-default-executor []
-  (Executors/newVirtualThreadPerTaskExecutor))
+  (or (maybe-virtual-thread-executor)
+      (let [cores (.availableProcessors (Runtime/getRuntime))]
+        (ThreadPoolExecutor. cores (* 16 cores)
+                             0 TimeUnit/MILLISECONDS
+                             (ArrayBlockingQueue. 16384)))))
 
 (defn- new-default-options []
   {:error-handler        default-error-handler
