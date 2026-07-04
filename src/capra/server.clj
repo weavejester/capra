@@ -526,12 +526,12 @@
   - `:write-buffer-size` - the write buffer size in bytes (default 32K)
   - `:write-queue-size` - the max number of writes in the queue (default 64)"
   ^Closeable [handler options]
-  (let [handler-opts (merge (new-default-options) options)
-        handler      (if (:async? handler-opts)
-                       (async-handler handler)
-                       (sync-handler handler))]
+  (let [options (merge (new-default-options) options)
+        handler (if (:async? options)
+                  (async-handler handler)
+                  (sync-handler handler))]
     (tcp/start-server
-     (assoc options :handler (http-handler handler handler-opts)))))
+     (assoc options :handler (http-handler handler options)))))
 
 (comment
   (require '[criterium.core :as c])
