@@ -443,10 +443,10 @@
     nil))
 
 (defn- http-handler
-  [handler {:keys [body-buffer-size error-logger]
+  [handler {:keys [error-logger stream-buffer-size]
             max-buf-size :read-buffer-size
             :as   options}]
-  (let [opts (assoc options :read-buffer-size body-buffer-size)]
+  (let [opts (assoc options :read-buffer-size stream-buffer-size)]
     (fn
       ([socket]
        (init-request socket))
@@ -491,13 +491,13 @@
   (Executors/newVirtualThreadPerTaskExecutor))
 
 (defn- new-default-options []
-  {:body-buffer-size     8192
-   :error-handler        default-error-handler
+  {:error-handler        default-error-handler
    :error-logger         default-error-logger
    :executor             (new-default-executor)
    :port                 80
    :read-buffer-size     8192
-   :response-buffer-size 32768})
+   :response-buffer-size 32768
+   :stream-buffer-size   8192})
 
 (defn run-server
   "Start a web server in a new thread with the supplied Ring handler and
@@ -507,8 +507,6 @@
   Accepts the following options:
 
   - `:async?` - if true, expect 3-arity async Ring handlers (defaults to false)
-  - `:body-buffer-size` - the size of the buffer used to read in the body of
-    the request when streaming (defaults to 8K)
   - `:control-queue-size` - the max number of queued control events (default 32)
   - `:error-handler` - a asynchronous Ring handler function used to handle
     uncaught exceptions (defaults to sending a 500 Internal Server Error).
@@ -523,6 +521,8 @@
     the response, which must be at least large enough to contain the response
     status line and headers (defaults to 32K)
   - `:reuse-address?` - sets the SO_REUSEADDR socket option (default false)
+  - `:stream-buffer-size` - the size of the buffer used to read in the body of
+    the request when streaming (defaults to 8K)
   - `:write-buffer-size` - the write buffer size in bytes (default 32K)
   - `:write-queue-size` - the max number of writes in the queue (default 64)"
   ^Closeable [handler options]
