@@ -1,4 +1,5 @@
-(ns capra.http.error)
+(ns capra.http.error
+  "Functions for handling client or server errors.")
 
 (defn- plaintext-response [status body]
   {:status  status
@@ -7,6 +8,7 @@
    :body    body})
 
 (def error-handlers
+  "A map of plaintext error handlers for responding to bad requests"
   {:unsupported-transfer-encoding
    (fn [{{:strs [transfer-encoding]} :headers}]
      (plaintext-response

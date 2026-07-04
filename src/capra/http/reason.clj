@@ -1,6 +1,8 @@
-(ns capra.http.reason)
+(ns capra.http.reason
+  "Contains a map of status codes to reasons.")
 
 (def status->reason
+  "A map connecting status codes with their reason strings."
   {100 "Continue"
    101 "Switching Protocols"
    200 "OK"
