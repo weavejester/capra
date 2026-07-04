@@ -50,7 +50,28 @@ several advantages:
 
 ## Usage
 
-TODO
+Given a Ring handler function:
+
+```clojure
+(defn handler [_request]
+  {:status  200
+   :headers {"Content-Type" "text/plain; charset=utf-8"}
+   :body    "Hello World"})
+```
+
+We can start a web server using the `capra.server/run-server` function:
+
+```clojure
+(require '[capra.server :as capra])
+
+(def server (capra/run-server handler :port 4000))
+```
+
+The server will run in a separate thread until closed:
+
+```clojure
+(.close server)
+```
 
 ## License
 
