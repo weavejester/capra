@@ -491,13 +491,12 @@
   (Executors/newVirtualThreadPerTaskExecutor))
 
 (defn- new-default-options []
-  (let [executor (new-default-executor)]
-    {:body-buffer-size     8192
-     :read-buffer-size     8192
-     :response-buffer-size 32768
-     :error-handler        default-error-handler
-     :error-logger         default-error-logger
-     :executor             executor}))
+  {:body-buffer-size     8192
+   :error-handler        default-error-handler
+   :error-logger         default-error-logger
+   :executor             (new-default-executor)
+   :read-buffer-size     8192
+   :response-buffer-size 32768})
 
 (defn run-server
   "Start a web server in a new thread with the supplied Ring handler and
