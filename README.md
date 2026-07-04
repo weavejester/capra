@@ -30,9 +30,9 @@ predominantly written in Java; either because they are wrappers around
 existing Java web servers, such as the [Ring Jetty Adapter][], or
 because they are heavily optimized, such as [http-kit][].
 
-Capra is written entirely in Clojure, and has only one dependency,
-[TeensyP][], which is also written entirely[^3] in Clojure. This has
-several advantages:
+Capra is written entirely in Clojure, and has only two dependencies:
+Ring Core Protocols and [TeensyP][], which is also written entirely[^3]
+in Clojure. This has several advantages:
 
 1. The codebase is more concise, making it a flexible platform for
    trying out experimental Ring features.
