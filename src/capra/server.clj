@@ -495,6 +495,7 @@
    :error-handler        default-error-handler
    :error-logger         default-error-logger
    :executor             (new-default-executor)
+   :port                 80
    :read-buffer-size     8192
    :response-buffer-size 32768})
 
@@ -514,7 +515,7 @@
   - `:error-logger` - a function that takes a simple exception argument and
     logs it somehow (defaults to printing to *err*)
   - `:executor` - the ExecutorService to use for running handlers
-  - `:port` - the port number to listen on
+  - `:port` - the port number to listen on (defaults to 80)
   - `:read-buffer-size` - the size of the buffer to use when reading from the
     socket (defaults to 8K)
   - `:recv-buffer-size` - the receive buffer size (i.e. the SO_RCVBUF option)
