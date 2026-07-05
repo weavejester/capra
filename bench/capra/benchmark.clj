@@ -15,7 +15,7 @@
             (str "http://localhost:" port)))
 
 (defn -main []
-  (with-open [_ (capra/start-server simple-handler {:port 5800})]
+  (with-open [_ (capra/run-server simple-handler {:port 5800})]
     (println "Benchmarking Capra...")
     (println (:out (wrk {:port 5800 :duration "1m"}))))
   (let [close (httpkit/run-server simple-handler {:port 5801})]
