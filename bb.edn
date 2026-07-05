@@ -1,0 +1,23 @@
+{:tasks
+ {hcloud:create
+  {:task (apply shell "hcloud server create"
+                "--name" "capra-bench"
+                "--type" "ccx13"
+                "--image" "ubuntu-26.04"
+                *command-line-args*)}
+  hcloud:setup
+  {:task (shell (str "hcloud server ssh capra-bench"
+                     " -o StrictHostKeyChecking=accept-new"
+                     " apt-get update && apt-get install -y"
+                     " openjdk-21-jdk leiningen wrk rlwrap"))}
+  hcloud:upload
+  {:requires ([babashka.process :refer [sh]]
+              [clojure.string :as str])
+   :task (let [ip (-> (sh "hcloud server ip capra-bench") :out str/trim)]
+           (shell (str "rsync -az . root@" ip ":/capra")))}
+  hcloud:bench
+  {:task (shell "hcloud server ssh capra-bench"
+                "cd /capra && lein bench")}
+  hcloud:delete
+  {:task (shell "hcloud server delete capra-bench")}}}
+  
