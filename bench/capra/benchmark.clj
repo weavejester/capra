@@ -17,6 +17,8 @@
             (str "http://localhost:" port)))
 
 (defn -main []
+  (println "Process ID: " (.pid (java.lang.ProcessHandle/current)))
+  (Thread/sleep 2000)
   (with-open [_ (capra/run-server simple-handler
                                   :port 5800
                                   :error-logger (fn [_]))]
