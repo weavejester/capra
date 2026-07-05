@@ -12,7 +12,7 @@
    :body    "Hello World"})
 
 (defn wrk [{:keys [port duration connections threads]
-            :or   {connections 10, threads 2}}]
+            :or   {connections 128, threads 2}}]
   (shell/sh "wrk" "-d" duration "-c" (str connections) "-t" (str threads)
             (str "http://localhost:" port)))
 
