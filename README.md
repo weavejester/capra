@@ -73,6 +73,10 @@ The server will run in a separate thread until closed:
 (.close server)
 ```
 
+## Performance
+
+![Capra benchmark results](docs/benchmarks.png)
+
 ## License
 
 Copyright © 2026 James Reeves
