@@ -11,6 +11,7 @@
   :aliases {"bench" ["with-profile" "+bench" "run"]}
   :profiles
   {:bench {:dependencies [[aleph "0.9.9"]
+                          [info.sunng/ring-jetty9-adapter "0.40.1"]
                           [luminus/ring-undertow-adapter "1.5.2"]
                           [ring/ring-jetty-adapter "1.15.5"]
                           [ring/ring-core "1.15.5"]

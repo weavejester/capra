@@ -4,6 +4,7 @@
             [clojure.java.shell :as shell]
             [org.httpkit.server :as httpkit]
             [ring.adapter.jetty :as jetty]
+            [ring.adapter.jetty9 :as rj9a]
             [ring.adapter.undertow :as undertow])
   (:import [org.eclipse.jetty.server Server]
            [ring.adapter.undertow UndertowWrapper]))
@@ -59,6 +60,14 @@
          (println (:out (wrk {:port port :duration "1m"})))
          (finally (.stop ^Server server)))))
 
+(defn bench-rj9a [handler port]
+  (let [server (rj9a/run-jetty handler {:port port :join? false})]
+    (try (println "Warming up rj9a...")
+         (wrk {:port port :duration "5s"})
+         (println "Benchmarking rj9a...")
+         (println (:out (wrk {:port port :duration "1m"})))
+         (finally (.stop ^Server server)))))
+
 (defn bench-undertow [handler port]
   (let [server (undertow/run-undertow handler {:port port})]
      (try (println "Warming up Ring Undertow...")
@@ -74,5 +83,6 @@
     (bench-capra 5801)
     (bench-http-kit 5802)
     (bench-jetty 5802)
+    (bench-rj9a 5803)
     (bench-undertow 5804))
   (shutdown-agents))
