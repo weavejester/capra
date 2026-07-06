@@ -1,11 +1,11 @@
 (ns capra.benchmark
-  (:require [capra.server :as capra]
+  (:require [aleph.http :as aleph]
+            [capra.server :as capra]
             [clojure.java.shell :as shell]
             [org.httpkit.server :as httpkit]
             [ring.adapter.jetty :as jetty]
             [ring.adapter.undertow :as undertow])
   (:import [org.eclipse.jetty.server Server]
-           [org.eclipse.jetty.util.thread VirtualThreadPool]
            [ring.adapter.undertow UndertowWrapper]))
 
 (def ^:const hot-work-timeout 40)
@@ -29,44 +29,50 @@
   (shell/sh "wrk" "-d" duration "-c" (str connections) "-t" (str threads)
             (str "http://localhost:" port)))
 
-(defn bench-capra [handler]
-  (with-open [_ (capra/run-server handler
-                                  :port 5800
-                                  :error-logger (fn [_]))]
-    (println "Warming up Capra...")
-    (wrk {:port 5800 :duration "5s"})
-    (println "Benchmarking Capra...")
-    (println (:out (wrk {:port 5800 :duration "1m"})))))
+(defn bench-aleph [handler port]
+  (with-open [_ (aleph/start-server handler {:port port})]
+    (println "Warming up Aleph")
+    (wrk {:port port :duration "5s"})
+    (println "Benchmarking Aleph")
+    (println (:out (wrk {:port port :duration "1m"})))))
 
-(defn bench-http-kit [handler]
-  (let [close (httpkit/run-server handler {:port 5801})]
+(defn bench-capra [handler port]
+  (with-open [_ (capra/run-server handler :port port :error-logger (fn [_]))]
+    (println "Warming up Capra...")
+    (wrk {:port port :duration "5s"})
+    (println "Benchmarking Capra...")
+    (println (:out (wrk {:port port :duration "1m"})))))
+
+(defn bench-http-kit [handler port]
+  (let [close (httpkit/run-server handler {:port port})]
     (try (println "Warming up http-kit...")
-         (wrk {:port 5801 :duration "5s"})
+         (wrk {:port port :duration "5s"})
          (println "Benchmarking HTTP-Kit...")
-         (println (:out (wrk {:port 5801 :duration "1m"})))
+         (println (:out (wrk {:port port :duration "1m"})))
          (finally (close)))))
 
-(defn bench-jetty [handler]
-  (let [server (jetty/run-jetty handler {:port 5802 :join? false})]
+(defn bench-jetty [handler port]
+  (let [server (jetty/run-jetty handler {:port port :join? false})]
     (try (println "Warming up Ring Jetty...")
-         (wrk {:port 5802 :duration "5s"})
+         (wrk {:port port :duration "5s"})
          (println "Benchmarking Ring Jetty...")
-         (println (:out (wrk {:port 5802 :duration "1m"})))
+         (println (:out (wrk {:port port :duration "1m"})))
          (finally (.stop ^Server server)))))
 
-(defn bench-undertow [handler]
-  (let [server (undertow/run-undertow handler {:port 5803})]
+(defn bench-undertow [handler port]
+  (let [server (undertow/run-undertow handler {:port port})]
      (try (println "Warming up Ring Undertow...")
-          (wrk {:port 5803 :duration "5s"})
+          (wrk {:port port :duration "5s"})
           (println "Benchmarking Ring Undertow...")
-          (println (:out (wrk {:port 5803 :duration "1m"})))
+          (println (:out (wrk {:port port :duration "1m"})))
           (finally (.stop ^UndertowWrapper server)))))
 
 (defn -main []
-  (println "Process ID: " (.pid (java.lang.ProcessHandle/current)))
+  (println "Process ID:" (.pid (java.lang.ProcessHandle/current)))
   (doto simple-handler
-    (bench-capra)
-    (bench-http-kit)
-    (bench-jetty)
-    (bench-undertow))
+    (bench-aleph 5800)
+    (bench-capra 5801)
+    (bench-http-kit 5802)
+    (bench-jetty 5802)
+    (bench-undertow 5804))
   (shutdown-agents))

@@ -10,7 +10,8 @@
   :global-vars {*warn-on-reflection* true}
   :aliases {"bench" ["with-profile" "+bench" "run"]}
   :profiles
-  {:bench {:dependencies [[luminus/ring-undertow-adapter "1.5.2"]
+  {:bench {:dependencies [[aleph "0.9.9"]
+                          [luminus/ring-undertow-adapter "1.5.2"]
                           [ring/ring-jetty-adapter "1.15.5"]
                           [ring/ring-core "1.15.5"]
                           [commons-io "2.21.0"]]
