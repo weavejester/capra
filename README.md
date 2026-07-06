@@ -75,6 +75,11 @@ The server will run in a separate thread until closed:
 
 ## Performance
 
+The following benchmark tests different adapters running a Ring handler
+that returns a simple 'Hello World' response. The default options for
+each adapter are used, and they're tested with `wrk` using 2 threads and
+128 connections on a CCX13 cloud server from Hetzner.
+
 ![Capra benchmark results](docs/benchmarks.png)
 
 ## License
