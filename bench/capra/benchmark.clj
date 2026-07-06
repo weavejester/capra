@@ -2,6 +2,7 @@
   (:require [aleph.http :as aleph]
             [capra.server :as capra]
             [clojure.java.shell :as shell]
+            [s-exp.hirundo :as hirundo]
             [org.httpkit.server :as httpkit]
             [ring.adapter.jetty :as jetty]
             [ring.adapter.jetty9 :as rj9a]
@@ -44,6 +45,14 @@
     (println "Benchmarking Capra...")
     (println (:out (wrk {:port port :duration "1m"})))))
 
+(defn bench-hirundo [handler port]
+  (let [server (hirundo/start! {:http-handler handler :port port})]
+    (try (println "Warming up Hirundo...")
+         (wrk {:port port :duration "5s"})
+         (println "Benchmarking Hirundo...")
+         (println (:out (wrk {:port port :duration "1m"})))
+         (finally (hirundo/stop! server)))))
+
 (defn bench-http-kit [handler port]
   (let [close (httpkit/run-server handler {:port port})]
     (try (println "Warming up http-kit...")
@@ -81,8 +90,9 @@
   (doto simple-handler
     (bench-aleph 5800)
     (bench-capra 5801)
-    (bench-http-kit 5802)
-    (bench-jetty 5802)
-    (bench-rj9a 5803)
-    (bench-undertow 5804))
+    (bench-hirundo 5802)
+    (bench-http-kit 5803)
+    (bench-jetty 5804)
+    (bench-rj9a 5805)
+    (bench-undertow 5806))
   (shutdown-agents))
