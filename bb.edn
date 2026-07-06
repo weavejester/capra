@@ -7,17 +7,22 @@
                 *command-line-args*)}
   hcloud:setup
   {:task (shell (str "hcloud server ssh capra-bench"
-                     " -o StrictHostKeyChecking=accept-new"
-                     " apt-get update && apt-get install -y"
-                     " openjdk-21-jdk leiningen wrk rlwrap"))}
+                     " -o StrictHostKeyChecking=accept-new")
+                (str " apt-get update && apt-get install -y"
+                     " openjdk-21-jdk wrk rlwrap &&"
+                     " mkdir -p /capra/bin &&"
+                     " curl https://codeberg.org/leiningen/leiningen/raw/"
+                     "branch/stable/bin/lein > /capra/bin/lein &&"
+                     " chmod +x /capra/bin/lein"))}
   hcloud:upload
   {:requires ([babashka.process :refer [sh]]
               [clojure.string :as str])
    :task (let [ip (-> (sh "hcloud server ip capra-bench") :out str/trim)]
            (shell (str "rsync -az . root@" ip ":/capra")))}
   hcloud:bench
-  {:task (shell "hcloud server ssh capra-bench"
-                "cd /capra && lein bench")}
+  {:depends [hcloud:upload]
+   :task (shell "hcloud server ssh capra-bench"
+                "cd /capra && bin/lein bench")}
   hcloud:delete
   {:task (shell "hcloud server delete capra-bench")}}}
   
