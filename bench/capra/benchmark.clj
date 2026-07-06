@@ -5,7 +5,8 @@
             [ring.adapter.jetty :as jetty]
             [ring.adapter.undertow :as undertow])
   (:import [org.eclipse.jetty.server Server]
-           [org.eclipse.jetty.util.thread VirtualThreadPool]))
+           [org.eclipse.jetty.util.thread VirtualThreadPool]
+           [ring.adapter.undertow UndertowWrapper]))
 
 (def ^:const hot-work-timeout 40)
 
@@ -59,7 +60,7 @@
           (wrk {:port 5803 :duration "5s"})
           (println "Benchmarking Ring Undertow...")
           (println (:out (wrk {:port 5803 :duration "1m"})))
-          (finally (.stop ^Server server)))))
+          (finally (.stop ^UndertowWrapper server)))))
 
 (defn -main []
   (println "Process ID: " (.pid (java.lang.ProcessHandle/current)))
