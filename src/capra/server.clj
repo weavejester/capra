@@ -15,7 +15,7 @@
            [java.nio.charset StandardCharsets]
            [java.time ZoneOffset ZonedDateTime]
            [java.time.format DateTimeFormatter]
-           [java.util.concurrent ArrayBlockingQueue ThreadPoolExecutor TimeUnit]
+           [java.util.concurrent Executors]
            [java.util.concurrent.atomic AtomicInteger]
            [java.util.concurrent.locks ReentrantLock]))
 
@@ -493,10 +493,7 @@
 
 (defn- new-default-executor []
   (or (maybe-virtual-thread-executor)
-      (let [cores (.availableProcessors (Runtime/getRuntime))]
-        (ThreadPoolExecutor. cores (* 16 cores)
-                             0 TimeUnit/MILLISECONDS
-                             (ArrayBlockingQueue. 16384)))))
+      (Executors/newFixedThreadPool 256)))
 
 (defn- new-default-options []
   {:error-handler        default-error-handler
