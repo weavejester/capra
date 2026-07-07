@@ -11,21 +11,28 @@
   (:import [org.eclipse.jetty.server Server]
            [ring.adapter.undertow UndertowWrapper]))
 
-(def ^:const hot-work-timeout 40)
-
 (defn simple-handler [_request]
   {:status  200
    :headers {"Content-Type" "text/plain; charset=UTF-8"}
    :body    "Hello World"})
 
+(defn hot-work [n]
+  (loop [i 0, x 0.0]
+    (when (< i n)
+      (recur (inc i) (+ x (Math/random))))))
+
 (defn hot-handler [_request]
-  (let [t0 (System/currentTimeMillis)]
-    (loop [n 0.0]
-      (if (< (- (System/currentTimeMillis) t0) hot-work-timeout)
-        (recur (+ n (Math/random)))
-        {:status  200
-         :headers {"Content-Type" "text/plain; charset=UTF-8"}
-         :body    (str "Result: " n)}))))
+  (try
+    (hot-work (+ 500 (rand-int 1500)))
+    (Thread/sleep (inc (rand-int 10)))
+    (hot-work (+ 500 (rand-int 1500)))
+    {:status  200
+     :headers {"Content-Type" "text/plain; charset=UTF-8"}
+     :body    "Simulated work and I/O response"}
+    (catch InterruptedException _
+     {:status  500
+      :headers {"Content-Type" "text/plain; charset=UTF-8"}
+      :body    "Interrupted."})))
 
 (defn wrk [{:keys [port duration connections threads]
             :or   {connections 128, threads 2}}]
@@ -96,7 +103,7 @@
 
 (defn -main []
   (println "Process ID:" (.pid (java.lang.ProcessHandle/current)))
-  (doto simple-handler
+  (doto hot-handler
     (bench-aleph 5800)
     (bench-capra 5801)
     (bench-hirundo 5802)
