@@ -4,6 +4,7 @@
             [clojure.java.shell :as shell]
             [s-exp.hirundo :as hirundo]
             [org.httpkit.server :as httpkit]
+            [ring-http-exchange.core :as http-exchange]
             [ring.adapter.jetty :as jetty]
             [ring.adapter.jetty9 :as rj9a]
             [ring.adapter.undertow :as undertow])
@@ -53,6 +54,14 @@
          (println (:out (wrk {:port port :duration "1m"})))
          (finally (hirundo/stop! server)))))
 
+(defn bench-http-exchange [handler port]
+  (let [server (http-exchange/run-http-server handler {:port port})]
+    (try (println "Warming up http-exchange...")
+         (wrk {:port port :duration "5s"})
+         (println "Benchmarking http-exchange...")
+         (println (:out (wrk {:port port :duration "1m"})))
+         (finally (http-exchange/stop-http-server server)))))
+
 (defn bench-http-kit [handler port]
   (let [close (httpkit/run-server handler {:port port})]
     (try (println "Warming up http-kit...")
@@ -91,8 +100,9 @@
     (bench-aleph 5800)
     (bench-capra 5801)
     (bench-hirundo 5802)
-    (bench-http-kit 5803)
-    (bench-jetty 5804)
-    (bench-rj9a 5805)
-    (bench-undertow 5806))
+    (bench-http-exchange 5803)
+    (bench-http-kit 5804)
+    (bench-jetty 5805)
+    (bench-rj9a 5806)
+    (bench-undertow 5807))
   (shutdown-agents))
