@@ -6,10 +6,10 @@ Capra supports HTTP/1.1 only and will not support older versions.
 WebSocket support is planned in the near future. HTTP/2 support is
 planned after that.
 
-[^1]: 'Correct' because Capra aims to be a well-behaved HTTP server.
-[^2]: 'Adequately Performant' because Capra aims to be at least more
-performant than the [Ring Jetty Adapter][], the most commonly used
-adapter.
+[^1]: 'Correct' because Capra aims to be a well-behaved HTTP server and
+a fully compliant Ring adapter.
+[^2]: 'Adequately Performant' because Capra aims to be within a
+reasonable margin of the fastest Ring adapters.
 
 [ring]: https://github.com/ring-clojure/ring
 
@@ -67,7 +67,11 @@ We can start a web server using the `capra.server/run-server` function:
 (def server (capra/run-server handler :port 4000))
 ```
 
-The server will run in a separate thread until closed:
+The options can be supplied as variadic arguments, or as a map.
+
+The server will run in a separate thread until closed. The server
+implements `java.io.Closeable`, so it can be closed via the `.close`
+method.
 
 ```clojure
 (.close server)
