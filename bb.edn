@@ -18,6 +18,7 @@
   {:requires ([babashka.process :refer [sh]]
               [clojure.string :as str])
    :task (let [ip (-> (sh "hcloud server ip capra-bench") :out str/trim)]
+           (println "Uploading current directory to benchmarking server...")
            (shell (str "rsync -az . root@" ip ":/capra")))}
   hcloud:bench
   {:depends [hcloud:upload]
