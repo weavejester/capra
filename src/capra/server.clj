@@ -515,9 +515,9 @@
   - `:async?` - if true, expect 3-arity async Ring handlers (defaults to false)
   - `:control-queue-size` - the max number of queued control events (default 32)
   - `:direct-read-buffer?` - allocate a direct buffer for reads (default true)
-  - `:error-handler` - a asynchronous Ring handler function used to handle
+  - `:error-handler` - an asynchronous Ring handler function used to handle
     uncaught exceptions (defaults to sending a 500 Internal Server Error).
-  - `:error-logger` - a function that takes a simple exception argument and
+  - `:error-logger` - a function that takes a single exception argument and
     logs it somehow (defaults to printing to *err*)
   - `:executor` - the ExecutorService to use for running handlers
   - `:port` - the port number to listen on (defaults to 80)
