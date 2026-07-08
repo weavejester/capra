@@ -77,6 +77,26 @@ method.
 (.close server)
 ```
 
+## Options
+
+| Key                     | Description                                         | Default |
+|-------------------------|-----------------------------------------------------|---------|
+| `:async?`               | Whether to use 3-arity asynchronous Ring handlers   | false   |
+| `:control-queue-size`   | The max number of queued control events             | 32      |
+| `:direct-read-buffer?`  | Allocate a direct ByteBuffer for reads              | false   |
+| `:error-handler`        | An async Ring handler called on uncaught exceptions |         |
+| `:error-logger`         | A function that takes an exception and logs it      |         |
+| `:executor`             | An `ExecutorService` to use for handler calls       |         |
+| `:port`                 | The port number to listen on                        | 80      |
+| `:read-buffer-size`     | The size in bytes of the channel read buffer        | 8K      |
+| `:recv-buffer-size`     | The receive buffer size (i.e. the SO_RCVBUF option) |         |
+| `:response-buffer-size` | The size of the buffer used for the response        | 32K     |
+| `:reuse-address?`       | The SO_REUSEADDR socket option                      | false   |
+| `:stream-buffer-size`   | The size of the request body InputStream buffer     | 8K      |
+| `:write-buffer-size`    | The size in bytes of the channel write buffer       | 32K     |
+| `:write-queue-size`     | The maximum number of writes that can be queued     | 64      |
+
+
 ## Performance
 
 These benchmarks are carried out using the `wrk` HTTP benchmarking tool,
