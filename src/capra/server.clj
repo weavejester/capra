@@ -496,7 +496,8 @@
       (Executors/newFixedThreadPool 256)))
 
 (defn- new-default-options []
-  {:error-handler        default-error-handler
+  {:direct-read-buffer?  true
+   :error-handler        default-error-handler
    :error-logger         default-error-logger
    :executor             (new-default-executor)
    :port                 80
@@ -513,6 +514,7 @@
 
   - `:async?` - if true, expect 3-arity async Ring handlers (defaults to false)
   - `:control-queue-size` - the max number of queued control events (default 32)
+  - `:direct-read-buffer?` - allocate a direct buffer for reads (default true)
   - `:error-handler` - a asynchronous Ring handler function used to handle
     uncaught exceptions (defaults to sending a 500 Internal Server Error).
   - `:error-logger` - a function that takes a simple exception argument and
