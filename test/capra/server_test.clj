@@ -585,3 +585,20 @@
                (-> response
                    (select-keys [:status :headers :body])
                    (update :headers dissoc "Date"))))))))
+
+(deftest request-with-chunked-body-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [body]}]
+                   {:status  200, :headers {}, :body body})
+                 {:port 4348})]
+    (let [response (http/post "http://localhost:4348"
+                              {:body (java.io.ByteArrayInputStream.
+                                      (.getBytes "Hello World" "UTF-8"))})]
+      (is (= {:status  200
+              :headers {"Connection"        ["close" "Transfer-Encoding"]
+                        "Transfer-Encoding" "chunked"
+                        "Server"            "Capra"}
+              :body    "Hello World"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))
