@@ -101,9 +101,9 @@ method.
 
 These benchmarks are carried out using the `wrk` HTTP benchmarking tool,
 configured to use 2 threads and 128 simultaneous connections. The
-machine used to benchmark is a CCX13 cloud server from Hetzer, which has
-2 cores. The default options for each adapter are used; there's no
-additional tuning.
+machine used to benchmark is a CCX13 cloud server from [Hetzner][],
+which has 2 cores. The default options for each adapter are used;
+there's no additional tuning. The JVM used is OpenJDK 21.
 
 ### Minimal handler
 
@@ -126,6 +126,8 @@ blocking I/O (such as from a database).
 
 The results for this test are more tightly clustered, as the majority
 of process time is now spent within the handler.
+
+[Hetzner]: https://www.hetzner.com/
 
 ## License
 
