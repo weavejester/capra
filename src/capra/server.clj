@@ -537,7 +537,7 @@
         handler (if (:async? options)
                   (async-handler handler)
                   (sync-handler handler))]
-    (tcp/start-server
+    (tcp/run-server
      (assoc options :handler (http-handler handler options)))))
 
 (comment
