@@ -6,6 +6,9 @@ Capra supports HTTP/1.1 only and will not support older versions.
 WebSocket support is planned in the near future. HTTP/2 support is
 planned after that.
 
+This adapter is currently **experimental** and not recommended for
+production use.
+
 [^1]: 'Correct' because Capra aims to be a well-behaved HTTP server and
 a fully compliant Ring adapter.
 [^2]: 'Adequately Performant' because Capra aims to be within a
