@@ -19,6 +19,11 @@
            [java.util.concurrent.atomic AtomicInteger]
            [java.util.concurrent.locks ReentrantLock]))
 
+(def ^:private ^:const SPACE 0x20)
+(def ^:private ^:const COLON 0x3A)
+(def ^:private ^:const CR 0x0D)
+(def ^:private ^:const LF 0x0A)
+
 (defn- ascii-bytes ^bytes [^String s]
   (.getBytes s StandardCharsets/US_ASCII))
 
@@ -43,19 +48,24 @@
                 :server-name (.getHostString local)
                 :remote-addr (.getHostString remote)})))
 
-(defn- parse-start-line [state line]
-  (or (when-some [space1 (str/index-of line \space)]
-        (when-some [space2 (str/index-of line \space (inc space1))]
-          (assoc! state
-                  ::step          :headers
-                  :request-method (keyword (str/lower-case (subs line 0 space1)))
-                  :uri            (subs line (inc space1) space2)
-                  :protocol       (subs line (inc space2))
-                  :headers        (transient {}))))
+(defn- parse-start-line [state ^String line]
+  (or (let [space1 (.indexOf line SPACE)]
+        (when (pos? space1)
+          (let [space2 (.indexOf line SPACE (inc space1))]
+            (when (pos? space2)
+              (let [method   (subs line 0 space1)
+                    uri      (subs line (inc space1) space2)
+                    protocol (subs line (inc space2))]
+                (assoc! state
+                        ::step          :headers
+                        :request-method (keyword (str/lower-case method))
+                        :uri            uri
+                        :protocol       protocol
+                        :headers        (transient {})))))))
       {::step  :error
        ::error :invalid-request-start-line}))
 
-(defn- read-start-line [state ^ByteBuffer buffer max-buffer-size]
+(defn- read-start-line [state ^ByteBuffer buffer ^long max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (let [{:keys [protocol] :as state} (parse-start-line state line)]
       (if (or (nil? protocol) (= protocol "HTTP/1.1"))
@@ -71,16 +81,17 @@
     (assoc! headers name (str existing-val "," value))
     (assoc! headers name value)))
 
-(defn- parse-header [{:keys [headers] :as state} line]
-  (if-some [colon-index (str/index-of line \:)]
-    (let [name  (str/lower-case (subs line 0 colon-index))
-          value (str/trim (subs line (inc colon-index)))]
-      (assoc! state :headers (assoc-request-header! headers name value)))
-    {::step    :error
-     ::error   :invalid-request-header
-     ::request {:bad-header line}}))
+(defn- parse-header [{:keys [headers] :as state} ^String line]
+  (let [colon-index (.indexOf line COLON)]
+    (if (pos? colon-index)
+      (let [name  (str/lower-case (subs line 0 colon-index))
+            value (str/trim (subs line (inc colon-index)))]
+        (assoc! state :headers (assoc-request-header! headers name value)))
+      {::step    :error
+       ::error   :invalid-request-header
+       ::request {:bad-header line}})))
 
-(defn- read-header [{:keys [headers] :as state} buffer max-buffer-size]
+(defn- read-header [{:keys [headers] :as state} buffer ^long max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
     (if (= line "")
       (assoc! state ::step :handler, :headers (persistent! headers))
@@ -92,8 +103,8 @@
   (.put buffer (.getBytes s StandardCharsets/US_ASCII)))
 
 (defn- write-crlf [^ByteBuffer buffer]
-  (.put buffer (byte \return))
-  (.put buffer (byte \newline)))
+  (.put buffer (byte CR))
+  (.put buffer (byte LF)))
 
 (defn- chunked-output-stream ^OutputStream [^OutputStream out]
   (let [lock   (ReentrantLock.)
@@ -115,7 +126,7 @@
 (defn- limited-output-stream ^OutputStream [^OutputStream out limit socket]
   (let [limit (AtomicInteger. limit)]
     (stream/output-stream
-     (fn write [^bytes b off len]
+     (fn write [^bytes b off ^long len]
        (let [len (min len (+ len (.addAndGet limit (- len))))]
          (when (pos? len)
            (.write out b off len))))
@@ -175,9 +186,10 @@
             (let [pos     (.position write-buf)
                   done?   (if (< len (.remaining write-buf))
                             (limit-buffer writerf write-buf (+ pos len))
-                            (writerf write-buf))
-                  written (- (.position write-buf) pos)]
-              (or done? (not (pos? (vreset! bytes-left (- len written)))))))))))
+                            (writerf write-buf))]
+              (or done? (let [len (- len (- (.position write-buf) pos))]
+                          (vreset! bytes-left len)
+                          (not (pos? len))))))))))
 
 (def ^:private end-chunk (ascii-bytes "\r\n0\r\n\r\n"))
 
@@ -186,21 +198,23 @@
         end    (ByteBuffer/wrap end-chunk)
         index  (volatile! 0)]
     (fn [write-buf]
-      (when (case (long @index)
-              0 (copy-buffer header write-buf)
-              1 (writerf write-buf)
-              2 (copy-buffer end write-buf))
-        (> (vswap! index inc) 2)))))
+      (let [idx (long @index)]
+        (when (case idx
+                0 (copy-buffer header write-buf)
+                1 (writerf write-buf)
+                2 (copy-buffer end write-buf))
+          (vreset! index (inc idx))
+          (>= idx 2))))))
 
 (defn- write-known-length-to-socket [socket headers buffer writerf len callback]
   (cond
     (headers "content-length")
-    (let [content-len (content-length headers)]
+    (let [^long content-len (content-length headers)]
       (write-crlf buffer)
       (cond
-        (= content-len len)
+        (= content-len ^long len)
         (run-writer writerf socket buffer callback)
-        (< content-len len)
+        (< content-len ^long len)
         (run-writer (limit-writer writerf content-len) socket buffer callback)
         :else
         (do (run-writer writerf socket buffer callback)
@@ -269,19 +283,19 @@
   (doto buffer
     (.put ^bytes http-1-1)
     (write-ascii (str status))
-    (.put (byte \space))
+    (.put (byte SPACE))
     (write-ascii (reason/status->reason status))
-    (.put (byte \return))
-    (.put (byte \newline))))
+    (.put (byte CR))
+    (.put (byte LF))))
 
 (defn- write-header [^ByteBuffer buffer k v]
   (doto buffer
     (.put (ascii-bytes k))
-    (.put (byte \:))
-    (.put (byte \space))
+    (.put (byte COLON))
+    (.put (byte SPACE))
     (.put (ascii-bytes v))
-    (.put (byte \return))
-    (.put (byte \newline))))
+    (.put (byte CR))
+    (.put (byte LF))))
 
 (defn- write-date-header [^ByteBuffer buffer]
   (.put buffer ^bytes date-header)
@@ -406,7 +420,7 @@
       (do (handler state socket chunk-buf) st)
       (next-request st socket))))
 
-(defn- limit-buffer-to-length ^ByteBuffer [^ByteBuffer buffer length]
+(defn- limit-buffer-to-length [^ByteBuffer buffer ^long length]
   (if (< length (.remaining buffer))
     (doto (.duplicate buffer)
       (.limit (+ (.position buffer) ^long length)))
@@ -416,7 +430,7 @@
   [{::keys [handler ^long length state] :as st} socket ^ByteBuffer buffer]
   (if (pos? length)
     (when (.hasRemaining buffer)
-      (let [capped-buffer (limit-buffer-to-length buffer length)
+      (let [capped-buffer ^ByteBuffer (limit-buffer-to-length buffer length)
             buffer-size   (.remaining capped-buffer)
             _state        (handler state socket capped-buffer)
             bytes-read    (- buffer-size (.remaining capped-buffer))
