@@ -160,6 +160,10 @@
   (when-let [m (re-find re-charset content-type)]
     (or (m 1) (m 2))))
 
+;; Writer functions add to a buffer and return true if there is nothing more
+;; to write, and false otherwise. They are an internal abstraction that allows
+;; different response body types to share common code.
+
 (defn- run-writer [writerf socket ^ByteBuffer buffer callback]
   (if (writerf buffer)
     (do (tcp/write socket (.flip buffer))
@@ -286,21 +290,14 @@
 (defn- write-status-line
   [^ByteBuffer buffer {:keys [status]}]
   (doto buffer
-    (.put ^bytes http-1-1)
-    (write-ascii (str status))
-    (.put (byte SPACE))
-    (write-ascii (reason/status->reason status))
-    (.put (byte CR))
-    (.put (byte LF))))
+    (.put ^bytes http-1-1) (write-ascii (str status))
+    (.put (byte SPACE))    (write-ascii (reason/status->reason status))
+    (write-crlf)))
 
 (defn- write-header [^ByteBuffer buffer k v]
   (doto buffer
-    (.put (ascii-bytes k))
-    (.put (byte COLON))
-    (.put (byte SPACE))
-    (.put (ascii-bytes v))
-    (.put (byte CR))
-    (.put (byte LF))))
+    (.put (ascii-bytes k)) (.put (byte COLON)) (.put (byte SPACE))
+    (.put (ascii-bytes v)) (write-crlf)))
 
 (defn- write-date-header [^ByteBuffer buffer]
   (.put buffer ^bytes date-header)
@@ -382,8 +379,8 @@
       ::length   (content-length (:headers req))})))
 
 (defn- run-simple-handler [ring-handler request socket opts]
-  (let [body    (InputStream/nullInputStream)
-        handled (atom false)
+  (let [handled (atom false)
+        body    (InputStream/nullInputStream)
         request (persistent! (assoc! request :body body))
         respond (ring-responder request socket handled opts)
         raise   (ring-raiser request respond opts)]
@@ -558,17 +555,3 @@
                   (sync-handler handler))]
     (tcp/run-server
      (assoc options :handler (http-handler handler options)))))
-
-(comment
-  (require '[criterium.core :as c])
-
-  (c/quick-bench (+ 1 1))
-
-  (defn simple-handler [_request]
-    {:status  200
-     :headers {"Content-Type" "text/plain; charset=UTF-8"}
-     :body    "Hello World"})
-
-  (def capra-server (run-server simple-handler {:port 6201}))
-
-  (.close capra-server))
