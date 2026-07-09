@@ -48,22 +48,28 @@
                 :server-name (.getHostString local)
                 :remote-addr (.getHostString remote)})))
 
+(defmacro ^:private when-pos [[sym expr & clauses] & body]
+  `(let [~sym ~expr]
+     (if (pos? ~sym)
+       ~(if (seq clauses)
+          `(when-pos ~(vec clauses) ~@body)
+          `(do ~@body)))))
+
+(defmacro ^:private if-pos {:clj-kondo/lint-as 'clojure.core/let}
+  [clauses then else]
+  `(or (when-pos ~clauses ~then) ~else))
+
 (defn- parse-start-line [state ^String line]
-  (or (let [space1 (.indexOf line SPACE)]
-        (when (pos? space1)
-          (let [space2 (.indexOf line SPACE (inc space1))]
-            (when (pos? space2)
-              (let [method   (subs line 0 space1)
-                    uri      (subs line (inc space1) space2)
-                    protocol (subs line (inc space2))]
-                (assoc! state
-                        ::step          :headers
-                        :request-method (keyword (str/lower-case method))
-                        :uri            uri
-                        :protocol       protocol
-                        :headers        (transient {})))))))
-      {::step  :error
-       ::error :invalid-request-start-line}))
+  (if-pos [space1 (.indexOf line SPACE)
+           space2 (.indexOf line SPACE (inc space1))]
+    (assoc! state
+            ::step          :headers
+            :request-method (keyword (str/lower-case (subs line 0 space1)))
+            :uri            (subs line (inc space1) space2)
+            :protocol       (subs line (inc space2))
+            :headers        (transient {}))
+    {::step  :error
+     ::error :invalid-request-start-line}))
 
 (defn- read-start-line [state ^ByteBuffer buffer ^long max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
@@ -82,14 +88,13 @@
     (assoc! headers name value)))
 
 (defn- parse-header [{:keys [headers] :as state} ^String line]
-  (let [colon-index (.indexOf line COLON)]
-    (if (pos? colon-index)
-      (let [name  (str/lower-case (subs line 0 colon-index))
-            value (str/trim (subs line (inc colon-index)))]
-        (assoc! state :headers (assoc-request-header! headers name value)))
-      {::step    :error
-       ::error   :invalid-request-header
-       ::request {:bad-header line}})))
+  (if-pos [colon-index (.indexOf line COLON)]
+    (let [name  (str/lower-case (subs line 0 colon-index))
+          value (str/trim (subs line (inc colon-index)))]
+      (assoc! state :headers (assoc-request-header! headers name value)))
+    {::step    :error
+     ::error   :invalid-request-header
+     ::request {:bad-header line}}))
 
 (defn- read-header [{:keys [headers] :as state} buffer ^long max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
