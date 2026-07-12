@@ -602,3 +602,20 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest response-without-content-type-test
+  (with-open [_ (capra/run-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {}
+                    :body    "Hello World"})
+                 {:port 4349})]
+    (let [response (http/get "http://localhost:4349")]
+      (is (= {:status  200
+              :headers {"Connection"     "close"
+                        "Content-Length" "11"
+                        "Server"         "Capra"}
+              :body    "Hello World"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))

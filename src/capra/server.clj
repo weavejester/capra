@@ -157,8 +157,9 @@
     )\s*(?:;|$)")
 
 (defn- content-charset [{:strs [content-type]}]
-  (when-let [m (re-find re-charset content-type)]
-    (or (m 1) (m 2))))
+  (when content-type
+    (when-some [m (re-find re-charset content-type)]
+      (or (m 1) (m 2)))))
 
 ;; Writer functions add to a buffer and return true if there is nothing more
 ;; to write, and false otherwise. They are an internal abstraction that allows
