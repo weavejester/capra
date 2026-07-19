@@ -339,7 +339,8 @@
 (defn- connection-close? [{:strs [connection]}]
   (when connection (.find (re-matcher re-close-connection connection))))
 
-(defn- ring-responder [request socket handled {buf-size :response-buffer-size}]
+(defn- ring-responder
+  [request socket handled done {buf-size :response-buffer-size}]
   (fn respond [{:keys [headers body] :as response} async?]
     (when (compare-and-set! handled false true)
       (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
@@ -348,8 +349,10 @@
         (.clear ^ByteBuffer buffer)
         (write-response-head buffer response headers close?)
         (write-body-to-socket body response headers buffer socket async?
-                              #(when (or close? (connection-close? headers))
-                                 (tcp/close socket)))))))
+                              #(do (when (or close? (connection-close? headers))
+                                     (tcp/close socket))
+                                   (vreset! done true)
+                                   (tcp/resume-reads socket)))))))
 
 (defn- ring-raiser [request respond {:keys [error-handler error-logger]}]
   (fn [exception]
@@ -359,34 +362,37 @@
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
 
-(defn- ring->stream-handler [ring-handler request opts]
+(defn- ring->stream-handler [ring-handler request done opts]
   (stream/input-stream-handler
    (fn [in socket]
      (let [handled (atom false)
            request (assoc request :body in)
-           respond (ring-responder request socket handled opts)
+           respond (ring-responder request socket handled done opts)
            raise   (ring-raiser request respond opts)]
        (ring-handler request respond raise)))
    opts))
 
 (defn- run-streaming-handler [ring-handler request socket opts]
-  (let [req     (persistent! request)
-        handler (ring->stream-handler ring-handler req opts)]
+  (let [done    (volatile! false)
+        req     (persistent! request)
+        handler (ring->stream-handler ring-handler req done opts)]
     (transient
      {::step     :body
       ::handler  handler
       ::state    (handler socket)
+      ::done     done
       ::chunked? (chunked-transfer? (:headers req))
       ::length   (content-length (:headers req))})))
 
 (defn- run-simple-handler [ring-handler request socket opts]
-  (let [handled (atom false)
+  (let [done    (volatile! false)
+        handled (atom false)
         body    (InputStream/nullInputStream)
         request (persistent! (assoc! request :body body))
-        respond (ring-responder request socket handled opts)
+        respond (ring-responder request socket handled done opts)
         raise   (ring-raiser request respond opts)]
     (ring-handler request respond raise)
-    (init-request socket)))
+    {::step :buffer, ::done done}))
 
 (defn- empty-request-body? [{:keys [headers]}]
   (and (not (contains? headers "content-length"))
@@ -412,16 +418,16 @@
           (.position buffer (+ start length 2))
           (doto chunked-buffer (.limit (+ start length))))))))
 
-(defn- next-request [{::keys [handler state]} socket]
+(defn- next-request [{::keys [done handler state]}]
   (handler state nil)
-  (init-request socket))
+  {::step :buffer, ::done done})
 
 (defn- read-chunked-body-stream
   [{::keys [handler state] :as st} socket buffer]
   (when-some [chunk-buf (read-chunk! buffer)]
     (if (.hasRemaining chunk-buf)
       (do (handler state socket chunk-buf) st)
-      (next-request st socket))))
+      (next-request st))))
 
 (defn- limit-buffer-to-length [^ByteBuffer buffer ^long length]
   (if (< length (.remaining buffer))
@@ -440,20 +446,24 @@
             length        (- length bytes-read)]
         (.position buffer (.position capped-buffer))
         (assoc! st ::length length)))
-    (next-request st socket)))
+    (next-request st)))
 
-(defn- read-body-stream [state socket buffer]
+(defn- read-body-stream [{:keys [done] :as state} socket buffer]
   (cond
     (::length state)   (read-known-length-body-stream state socket buffer)
     (::chunked? state) (read-chunked-body-stream state socket buffer)
-    :else              (next-request state socket)))
+    :else              {::step :buffer, ::done done}))
+
+(defn- buffer-reads [{::keys [done]} socket]
+  (when @done (init-request socket)))
 
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
 
 (defn- write-error-response [{::keys [error request]} socket opts]
-  (let [handled (atom false)
-        respond (ring-responder request socket handled opts)
+  (let [done    (volatile! false)
+        handled (atom false)
+        respond (ring-responder request socket handled done opts)
         handler (err/error-handlers error)]
     (respond (handler request) false)
     (tcp/close socket)
@@ -475,6 +485,7 @@
                      :headers    (read-header state buffer max-buf-size)
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
+                     :buffer     (buffer-reads state socket)
                      :error      (write-error-response state socket opts)
                      nil)]
            (recur new-state)

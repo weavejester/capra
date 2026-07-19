@@ -619,3 +619,41 @@
              (-> response
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
+
+(deftest pipelined-requests-test
+  (with-open [_ (capra/run-server
+                 (fn [{:keys [uri]} respond _raise]
+                   (case uri
+                     "/foo"
+                     (future
+                       (Thread/sleep 30)
+                       (respond
+                        {:status  200
+                         :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                         :body    "Foo"}))
+                     "/bar"
+                     (respond
+                      {:status  200
+                       :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                       :body    "Bar"})))
+                 {:port   4350
+                  :async? true})]
+    (let [response (raw-http-request
+                    "localhost" 4350
+                    (str "GET /foo HTTP/1.1\r\n"
+                         "Host: localhost\r\n\r\n"
+                         "GET /bar HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Connection: close\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 200 OK\r\n"
+                  "Server: Capra\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 3\r\n\r\n"
+                  "Foo"
+                  "HTTP/1.1 200 OK\r\n"
+                  "Connection: close\r\n"
+                  "Server: Capra\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 3\r\n\r\n"
+                  "Bar")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))
