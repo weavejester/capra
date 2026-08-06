@@ -14,6 +14,15 @@
     (.flush writer)
     (slurp (.getInputStream socket) :encoding "US-ASCII")))
 
+(defn- half-closed-http-request [^String host ^long port ^String raw-request]
+  (with-open [socket (java.net.Socket. host port)]
+    (.setSoTimeout socket 1000)
+    (let [writer (io/writer (.getOutputStream socket) :encoding "US-ASCII")]
+      (.write writer raw-request)
+      (.flush writer)
+      (.shutdownOutput socket)
+      (slurp (.getInputStream socket) :encoding "US-ASCII"))))
+
 (defn- sha256sum [^bytes bs]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
     (.formatHex (java.util.HexFormat/of) (.digest digest bs))))
@@ -523,7 +532,8 @@
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
                     :body    (slurp body)})
-                 {:port 4355})]
+                 {:port 4355
+                  :error-logger (fn [_exception])})]
     (let [response (raw-http-request
                     "localhost" 4355
                     (str "POST / HTTP/1.1\r\n"
@@ -548,6 +558,76 @@
                     "Invalid chunk size in request body.")
                (str/replace response #"Date: (.*?)\r\n" ""))
             (str "Chunk size " (pr-str size) " is rejected"))))))
+
+(deftest framing-error-closes-request-body-with-exception-test
+  (let [body-result (promise)]
+    (with-open [_ (capra/run-server
+                   (fn handler [{:keys [body]} _respond _raise]
+                     (try
+                       (deliver body-result {:body (slurp body)})
+                       (catch Exception exception
+                         (deliver body-result {:exception exception}))))
+                   {:port 4370, :async? true})]
+      (let [response (raw-http-request
+                      "localhost" 4370
+                      (str "POST / HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Transfer-Encoding: chunked\r\n\r\n"
+                           "5\r\nHello\r\n"
+                           "not-a-size\r\n"))
+            result   (deref body-result 1000 ::timeout)]
+        (is (str/starts-with? response "HTTP/1.1 400 Bad Request\r\n"))
+        (is (instance? java.io.IOException (:exception result))
+            "The Ring body stream throws instead of returning partial data")
+        (is (= "Invalid HTTP request framing: invalid-chunk-size"
+               (ex-message (:exception result))))))))
+
+(deftest truncated-request-body-closes-with-exception-test
+  (let [body-result (promise)]
+    (with-open [_ (capra/run-server
+                   (fn handler [{:keys [body]} _respond _raise]
+                     (try
+                       (deliver body-result {:body (slurp body)})
+                       (catch Exception exception
+                         (deliver body-result {:exception exception}))))
+                   {:port 4375, :async? true})]
+      (half-closed-http-request
+       "localhost" 4375
+       (str "POST / HTTP/1.1\r\n"
+            "Host: localhost\r\n"
+            "Content-Length: 10\r\n\r\n"
+            "Hello"))
+      (let [result (deref body-result 1000 ::timeout)]
+        (is (instance? java.io.IOException (:exception result))
+            "A truncated fixed-length body does not return partial success")
+        (is (= "Unexpected EOF in HTTP request body"
+               (ex-message (:exception result))))))))
+
+(deftest invalid-chunk-data-terminator-test
+  (let [body-result (promise)]
+    (with-open [_ (capra/run-server
+                   (fn handler [{:keys [body]} _respond _raise]
+                     (try
+                       (deliver body-result {:body (slurp body)})
+                       (catch Exception exception
+                         (deliver body-result {:exception exception}))))
+                   {:port 4371, :async? true})]
+      (let [response (raw-http-request
+                      "localhost" 4371
+                      (str "POST / HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Transfer-Encoding: chunked\r\n\r\n"
+                           "5\r\nHelloX\n"))
+            result   (deref body-result 1000 ::timeout)]
+        (is (= (str "HTTP/1.1 400 Bad Request\r\n"
+                    "Server: Capra\r\n"
+                    "Connection: close\r\n"
+                    "Content-Type: text/plain; charset=UTF-8\r\n"
+                    "Content-Length: 41\r\n\r\n"
+                    "Invalid chunk terminator in request body.")
+               (str/replace response #"Date: (.*?)\r\n" "")))
+        (is (instance? java.io.IOException (:exception result))
+            "A malformed data terminator fails the Ring body stream")))))
 
 (deftest missing-host-header-test
   (with-open [_ (capra/run-server
@@ -720,6 +800,62 @@
                            "Connection: close\r\n\r\n"))]
         (is (str/starts-with? response "HTTP/1.1 599 Unknown\r\n")
             "A status with no known reason phrase is still written")))))
+
+(deftest unsupported-informational-response-test
+  (let [logs (atom [])]
+    (with-open [_ (capra/run-server
+                   (fn handler [_request]
+                     {:status 103, :headers {}, :body "hints"})
+                   {:port 4372
+                    :error-logger #(swap! logs conj (ex-message %))})]
+      (let [response (raw-http-request
+                      "localhost" 4372
+                      (str "GET / HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Connection: close\r\n\r\n"))]
+        (is (str/starts-with? response
+                              "HTTP/1.1 500 Internal Server Error\r\n"))
+        (is (= ["Invalid response"] @logs)
+            "A lone 1xx response is rejected instead of ending the exchange")))))
+
+(deftest successful-connect-response-test
+  (let [logs (atom [])]
+    (with-open [_ (capra/run-server
+                   (fn handler [_request]
+                     {:status 200, :headers {}, :body "not a tunnel"})
+                   {:port 4373
+                    :error-logger #(swap! logs conj (ex-message %))})]
+      (let [response (raw-http-request
+                      "localhost" 4373
+                      (str "CONNECT example.com:443 HTTP/1.1\r\n"
+                           "Host: example.com:443\r\n"
+                           "Connection: close\r\n\r\n"))]
+        (is (str/starts-with? response
+                              "HTTP/1.1 500 Internal Server Error\r\n"))
+        (is (= ["Invalid response"] @logs)
+            "A successful CONNECT is rejected without a tunnel handoff API")))))
+
+(deftest non-map-response-headers-test
+  (let [logs (atom [])]
+    (with-open [_ (capra/run-server
+                   (fn handler [{:keys [uri]}]
+                     {:status 200
+                      :headers (case uri
+                                 "/vector" [["X-Test" "value"]]
+                                 "/nil" nil)
+                      :body "Hello World"})
+                   {:port 4374
+                    :error-logger #(swap! logs conj (ex-message %))})]
+      (doseq [uri ["/vector" "/nil"]]
+        (let [response (raw-http-request
+                        "localhost" 4374
+                        (str "GET " uri " HTTP/1.1\r\n"
+                             "Host: localhost\r\n"
+                             "Connection: close\r\n\r\n"))]
+          (is (str/starts-with? response
+                                "HTTP/1.1 500 Internal Server Error\r\n")
+              (str "The response to " uri " uses the 500 fallback"))))
+      (is (= ["Invalid response" "Invalid response"] @logs)))))
 
 (deftest async-streaming-response-body-test
   (let [body (reify ring.core.protocols/StreamableResponseBody

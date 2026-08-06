@@ -31,6 +31,9 @@
    :invalid-chunk-size
    (constantly
     (plaintext-response 400 "Invalid chunk size in request body."))
+   :invalid-chunk-terminator
+   (constantly
+    (plaintext-response 400 "Invalid chunk terminator in request body."))
    :missing-host-header
    (constantly (plaintext-response 400 "Missing \"Host\" header in request."))
    :duplicate-host-header

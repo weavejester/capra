@@ -8,7 +8,7 @@
             [teensyp.concurrent :refer [with-lock]]
             [teensyp.server :as tcp]
             [teensyp.stream :as stream])
-  (:import [java.io File FileInputStream InputStream OutputStream]
+  (:import [java.io File FileInputStream IOException InputStream OutputStream]
            [java.net InetSocketAddress]
            [java.nio ByteBuffer]
            [java.nio.channels FileChannel]
@@ -411,15 +411,25 @@
          (every? valid-header-value? value)
          (valid-header-value? value))))
 
+(defn- successful-connect?
+  [{:keys [request-method]} status]
+  (and (= :connect request-method) (<= 200 status 299)))
+
 (defn- valid-response?
   "Return true if the response can be written without corrupting the message.
   RFC 9112 section 4 defines the status code as three digits, and the field
   syntax of RFC 9110 section 5.5 admits neither a name that is not a token nor
-  a value containing CR, LF or NUL."
-  [{:keys [status headers]}]
-  (and (integer? status)
-       (<= 100 status 999)
-       (every? valid-header? headers)))
+  a value containing CR, LF or NUL. Capra cannot emit an informational response
+  followed by a final response, nor transfer a successful CONNECT connection
+  to a tunnel handler, so those response forms are rejected as unsupported."
+  [request response]
+  (and (map? response)
+       (let [{:keys [status headers]} response]
+         (and (integer? status)
+              (<= 200 status 999)
+              (not (successful-connect? request status))
+              (map? headers)
+              (every? valid-header? headers)))))
 
 (def ^:private invalid-response
   {:status  500
@@ -455,7 +465,7 @@
   ;; once bytes are on the wire nothing can be retracted.
   (fn respond [response async?]
     (when (compare-and-set! handled false true)
-      (let [response (if (valid-response? response)
+      (let [response (if (valid-response? request response)
                        response
                        (do (error-logger (ex-info "Invalid response"
                                                   {:response response}))
@@ -491,10 +501,18 @@
   (and (contains? headers "content-length")
        (contains? headers "transfer-encoding")))
 
-(defn- ring->stream-handler [ring-handler request handled done opts]
+(defn- guarded-input-stream [^InputStream in body-error]
+  (stream/input-stream
+   (fn [b off len]
+     (when-some [exception @body-error] (throw exception))
+     (let [n (.read in b off len)]
+       (if-some [exception @body-error] (throw exception) n)))
+   #(.close in)))
+
+(defn- ring->stream-handler [ring-handler request handled done body-error opts]
   (stream/input-stream-handler
    (fn [in socket]
-     (let [request (assoc request :body in)
+     (let [request (assoc request :body (guarded-input-stream in body-error))
            respond (ring-responder request socket handled done opts)
            raise   (ring-raiser request respond opts)]
        (ring-handler request respond raise)))
@@ -503,12 +521,15 @@
 (defn- run-streaming-handler [ring-handler request socket opts]
   (let [done    (volatile! false)
         handled (atom false)
+        body-error (atom nil)
         req     (persistent! request)
-        handler (ring->stream-handler ring-handler req handled done opts)]
+        handler (ring->stream-handler ring-handler req handled done body-error
+                                     opts)]
     (transient
      {::step     :body
       ::handler  handler
       ::handled  handled
+      ::body-error body-error
       ::state    (handler socket)
       ::done     done
       ::chunked? (chunked-transfer? (:headers req))
@@ -556,9 +577,10 @@
 (defn- read-chunk!
   "Read the next chunk of a chunked request body, advancing the buffer past it.
   Returns a buffer limited to the chunk data, `::last-chunk` if the chunk size
-  was zero, `::invalid` if the chunk size is malformed, or nil if the buffer
-  does not yet hold the whole chunk. Only the chunk-size line of the last chunk
-  is consumed; what follows it is the trailer section."
+  was zero, `::invalid` if the chunk size is malformed, `::invalid-terminator`
+  if the chunk data is not followed by CRLF, or nil if the buffer does not yet
+  hold the whole chunk. Only the chunk-size line of the last chunk is consumed;
+  what follows it is the trailer section."
   [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
     (when-some [head (buf/read-line chunked-buffer StandardCharsets/US_ASCII)]
@@ -568,8 +590,12 @@
           (if (zero? length)
             (do (.position buffer start) ::last-chunk)
             (when (<= (+ start length 2) (.limit buffer))
-              (.position buffer (+ start length 2))
-              (doto chunked-buffer (.limit (+ start length))))))
+              (let [end (+ start length)]
+                (if (and (= CR (.get buffer end))
+                         (= LF (.get buffer (inc end))))
+                  (do (.position buffer (+ end 2))
+                      (doto chunked-buffer (.limit end)))
+                  ::invalid-terminator)))))
         ::invalid))))
 
 (defn- next-request [{::keys [done handler state]}]
@@ -582,6 +608,8 @@
     (condp = chunk
       ::last-chunk (assoc! st ::step :trailers)
       ::invalid    (assoc! st ::step :error, ::error :invalid-chunk-size)
+      ::invalid-terminator
+      (assoc! st ::step :error, ::error :invalid-chunk-terminator)
       (do (handler state socket chunk) st))))
 
 ;; The trailer section is read and discarded. It is not exposed to the handler,
@@ -624,8 +652,12 @@
 (defn- buffer-reads [{::keys [done]} socket]
   (when @done (init-request socket)))
 
-(defn- close-response [{::keys [handler state]} exception]
+(defn- close-response [{::keys [handler state body-error]} exception]
+  (when (and body-error exception) (reset! body-error exception))
   (handler state exception))
+
+(defn- framing-exception [error]
+  (IOException. (str "Invalid HTTP request framing: " (name error))))
 
 (defn- write-error-response
   [{::keys [error request handled] :as state} socket opts]
@@ -634,7 +666,8 @@
         respond (ring-responder request socket handled done opts)
         errorf  (err/error-handlers error)]
     (respond (errorf request) false)
-    (when (::handler state) (close-response state nil))
+    (when (::handler state)
+      (close-response state (framing-exception error)))
     (tcp/close socket)
     {::step :closed}))
 
@@ -664,5 +697,9 @@
       ([{::keys [step] :as state} exception]
        (when exception (error-logger exception))
        (case step
-         (:body :trailers) (close-response state exception)
+         (:body :trailers)
+         (close-response
+          state
+          (or exception
+              (IOException. "Unexpected EOF in HTTP request body")))
          nil)))))
