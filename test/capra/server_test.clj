@@ -682,6 +682,44 @@
         (is (str/starts-with? response "HTTP/1.1 400 Bad Request\r\n")
             (str "The header line " (pr-str line) " is rejected"))))))
 
+(deftest invalid-response-test
+  (let [logs (atom [])]
+    (with-open [_ (capra/run-server
+                   (fn handler [{:keys [uri]}]
+                     (case uri
+                       "/split"   {:status  200
+                                   :headers {"Location" "/x\r\nX-Injected: yes"}
+                                   :body    "Hello World"}
+                       "/name"    {:status  200
+                                   :headers {"X Example" "foo"}
+                                   :body    "Hello World"}
+                       "/status"  {:status "200" :headers {} :body "Hello World"}
+                       "/unknown" {:status 599 :headers {} :body "Hello World"}))
+                   {:port 4358
+                    :error-logger #(swap! logs conj (ex-message %))})]
+      (doseq [uri ["/split" "/name" "/status"]]
+        (let [response (raw-http-request
+                        "localhost" 4358
+                        (str "GET " uri " HTTP/1.1\r\n"
+                             "Host: localhost\r\n"
+                             "Connection: close\r\n\r\n"))]
+          (is (= (str "HTTP/1.1 500 Internal Server Error\r\n"
+                      "Connection: close\r\n"
+                      "Server: Capra\r\n"
+                      "Content-Type: text/plain; charset=UTF-8\r\n"
+                      "Content-Length: 21\r\n\r\n"
+                      "Internal Server Error")
+                 (str/replace response #"Date: (.*?)\r\n" ""))
+              (str "The response to " uri " is replaced by a 500"))))
+      (is (= ["Invalid response" "Invalid response" "Invalid response"] @logs))
+      (let [response (raw-http-request
+                      "localhost" 4358
+                      (str "GET /unknown HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Connection: close\r\n\r\n"))]
+        (is (str/starts-with? response "HTTP/1.1 599 Unknown\r\n")
+            "A status with no known reason phrase is still written")))))
+
 (deftest file-response-body-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]

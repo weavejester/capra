@@ -333,7 +333,7 @@
   [^ByteBuffer buffer {:keys [status]}]
   (doto buffer
     (.put ^bytes http-1-1) (write-ascii (str status))
-    (.put (byte SPACE))    (write-ascii (reason/status->reason status))
+    (.put (byte SPACE))    (write-ascii (reason/status->reason status "Unknown"))
     (write-crlf)))
 
 (defn- write-header [^ByteBuffer buffer k v]
@@ -375,17 +375,53 @@
 (defn- normalize-headers [headers]
   (persistent! (reduce-kv assoc-response-header! (transient {}) headers)))
 
+(def ^:private re-field-value #"[^\r\n\u0000]*")
+
+(defn- valid-header-value? [value]
+  (and (string? value) (re-matches re-field-value value)))
+
+(defn- valid-header? [[name value]]
+  (and (string? name)
+       (re-matches re-token name)
+       (if (vector? value)
+         (every? valid-header-value? value)
+         (valid-header-value? value))))
+
+(defn- valid-response?
+  "Return true if the response can be written without corrupting the message.
+  RFC 9112 section 4 defines the status code as three digits, and the field
+  syntax of RFC 9110 section 5.5 admits neither a name that is not a token nor
+  a value containing CR, LF or NUL."
+  [{:keys [status headers]}]
+  (and (integer? status)
+       (<= 100 status 999)
+       (every? valid-header? headers)))
+
+(def ^:private invalid-response
+  {:status  500
+   :headers {"Content-Type" "text/plain; charset=UTF-8"}
+   :body    "Internal Server Error"})
+
 (def ^:private re-close-connection #"(?i)(^| *,)close( *,|$)")
 
 (defn- connection-close? [{:strs [connection]}]
   (when connection (.find (re-matcher re-close-connection connection))))
 
 (defn- ring-responder
-  [request socket handled done {buf-size :response-buffer-size}]
-  (fn respond [{:keys [headers body] :as response} async?]
+  [request socket handled done {buf-size :response-buffer-size
+                                :keys    [error-logger]}]
+  ;; The response is checked before the first byte of it is written, because
+  ;; once bytes are on the wire nothing can be retracted.
+  (fn respond [response async?]
     (when (compare-and-set! handled false true)
-      (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-            headers (normalize-headers headers)
+      (let [response (if (valid-response? response)
+                       response
+                       (do (error-logger (ex-info "Invalid response"
+                                                  {:response response}))
+                           invalid-response))
+            body    (:body response)
+            buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
+            headers (normalize-headers (:headers response))
             close?  (connection-close? (:headers request))]
         (.clear ^ByteBuffer buffer)
         (write-response-head buffer response headers close?)
