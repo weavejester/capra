@@ -391,11 +391,10 @@
   (and (contains? headers "content-length")
        (contains? headers "transfer-encoding")))
 
-(defn- ring->stream-handler [ring-handler request done opts]
+(defn- ring->stream-handler [ring-handler request handled done opts]
   (stream/input-stream-handler
    (fn [in socket]
-     (let [handled (atom false)
-           request (assoc request :body in)
+     (let [request (assoc request :body in)
            respond (ring-responder request socket handled done opts)
            raise   (ring-raiser request respond opts)]
        (ring-handler request respond raise)))
@@ -403,11 +402,13 @@
 
 (defn- run-streaming-handler [ring-handler request socket opts]
   (let [done    (volatile! false)
+        handled (atom false)
         req     (persistent! request)
-        handler (ring->stream-handler ring-handler req done opts)]
+        handler (ring->stream-handler ring-handler req handled done opts)]
     (transient
      {::step     :body
       ::handler  handler
+      ::handled  handled
       ::state    (handler socket)
       ::done     done
       ::chunked? (chunked-transfer? (:headers req))
@@ -442,14 +443,22 @@
     :else
     (run-streaming-handler ring-handler request socket opts)))
 
-(defn- read-chunk! ^ByteBuffer [^ByteBuffer buffer]
+(defn- read-chunk!
+  "Read the next chunk of a chunked request body, advancing the buffer past it.
+  Returns a buffer limited to the chunk data, `::last-chunk` if the chunk size
+  was zero, or nil if the buffer does not yet hold the whole chunk. Only the
+  chunk-size line of the last chunk is consumed; what follows it is the trailer
+  section."
+  [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
     (when-some [head (buf/read-line chunked-buffer StandardCharsets/US_ASCII)]
       (let [start  (.position chunked-buffer)
             length (Long/parseLong head 16)]
-        (when (<= (+ length 2) (.remaining buffer))
-          (.position buffer (+ start length 2))
-          (doto chunked-buffer (.limit (+ start length))))))))
+        (if (zero? length)
+          (do (.position buffer start) ::last-chunk)
+          (when (<= (+ start length 2) (.limit buffer))
+            (.position buffer (+ start length 2))
+            (doto chunked-buffer (.limit (+ start length)))))))))
 
 (defn- next-request [{::keys [done handler state]}]
   (handler state nil)
@@ -457,10 +466,22 @@
 
 (defn- read-chunked-body-stream
   [{::keys [handler state] :as st} socket buffer]
-  (when-some [chunk-buf (read-chunk! buffer)]
-    (if (.hasRemaining chunk-buf)
-      (do (handler state socket chunk-buf) st)
-      (next-request st))))
+  (when-some [chunk (read-chunk! buffer)]
+    (if (= ::last-chunk chunk)
+      (assoc! st ::step :trailers)
+      (do (handler state socket chunk) st))))
+
+;; The trailer section is read and discarded. It is not exposed to the handler,
+;; which has already been given the request map, but it must be consumed or the
+;; next read would parse it as the start line of a pipelined request.
+
+(defn- read-trailer [state ^ByteBuffer buffer ^long max-buffer-size]
+  (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]
+    (if (= line "")
+      (next-request state)
+      state)
+    (when-not (< (.limit buffer) max-buffer-size)
+      (assoc! state ::step :error, ::error :request-header-field-too-large))))
 
 (defn- limit-buffer-to-length [^ByteBuffer buffer ^long length]
   (if (< length (.remaining buffer))
@@ -493,12 +514,14 @@
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
 
-(defn- write-error-response [{::keys [error request]} socket opts]
+(defn- write-error-response
+  [{::keys [error request handled] :as state} socket opts]
   (let [done    (volatile! false)
-        handled (atom false)
+        handled (or handled (atom false))
         respond (ring-responder request socket handled done opts)
-        handler (err/error-handlers error)]
-    (respond (handler request) false)
+        errorf  (err/error-handlers error)]
+    (respond (errorf request) false)
+    (when (::handler state) (close-response state nil))
     (tcp/close socket)
     nil))
 
@@ -519,6 +542,7 @@
                      :headers    (read-header state buffer max-buf-size)
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
+                     :trailers   (read-trailer state buffer max-buf-size)
                      :buffer     (buffer-reads state socket)
                      :error      (write-error-response state socket opts)
                      nil)]
@@ -527,5 +551,5 @@
       ([{::keys [step] :as state} exception]
        (when exception (error-logger exception))
        (case step
-         :body (close-response state exception)
+         (:body :trailers) (close-response state exception)
          nil)))))

@@ -490,6 +490,32 @@
       (is (not (str/includes? response "Hello"))
           "The request body is not treated as a request"))))
 
+(deftest chunked-body-trailer-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [uri body]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (str uri ":" (slurp body))})
+                 {:port 4354})]
+    (let [response (raw-http-request
+                    "localhost" 4354
+                    (str "POST / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Transfer-Encoding: chunked\r\n"
+                         "Connection: close\r\n\r\n"
+                         "5\r\nHello\r\n"
+                         "0\r\n"
+                         "GET /admin HTTP/1.1\r\n"
+                         "\r\n"))]
+      (is (= (str "HTTP/1.1 200 OK\r\n"
+                  "Connection: close\r\n"
+                  "Server: Capra\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 7\r\n\r\n"
+                  "/:Hello")
+             (str/replace response #"Date: (.*?)\r\n" ""))
+          "The trailer section is consumed, not parsed as a request"))))
+
 (deftest missing-host-header-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]
