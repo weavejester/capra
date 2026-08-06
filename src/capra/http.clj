@@ -86,16 +86,30 @@
     (assoc! headers name (str existing-val "," value))
     (assoc! headers name value)))
 
+(def ^:private re-token #"[!#$%&'*+\-.^_`|~0-9A-Za-z]+")
+
+(defn- invalid-header [line]
+  {::step    :error
+   ::error   :invalid-request-header
+   ::request {:bad-header line}})
+
+;; A field name must be a token, which rules out whitespace before the colon.
+;; It also rules out an obs-fold continuation line, as that begins with SP or
+;; HTAB, and RFC 9112 section 5.2 requires a server that does not support
+;; obs-fold to reject it.
+
 (defn- parse-header [{:keys [headers] :as state} ^String line]
   (if-pos [colon-index (.indexOf line COLON)]
     (let [name  (str/lower-case (subs line 0 colon-index))
           value (str/trim (subs line (inc colon-index)))]
-      (if (and (= name "host") (headers name))
+      (cond
+        (not (re-matches re-token name))
+        (invalid-header line)
+        (and (= name "host") (headers name))
         {::step :error, ::error :duplicate-host-header}
+        :else
         (assoc! state :headers (assoc-request-header! headers name value))))
-    {::step    :error
-     ::error   :invalid-request-header
-     ::request {:bad-header line}}))
+    (invalid-header line)))
 
 (defn- read-header [{:keys [headers] :as state} buffer ^long max-buffer-size]
   (if-some [line (buf/read-line buffer StandardCharsets/US_ASCII)]

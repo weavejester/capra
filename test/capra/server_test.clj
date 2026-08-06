@@ -649,6 +649,39 @@
                   "Invalid HTTP request header line: \"InvalidHeader\".")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
+(deftest non-token-request-header-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [uri]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (str "Handled " uri)})
+                 {:port 4357})]
+    (let [response (raw-http-request
+                    "localhost" 4357
+                    (str "POST / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Content-Length : 5\r\n\r\n"
+                         "GET /admin HTTP/1.1\r\n"
+                         "Host: localhost\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 400 Bad Request\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 55\r\n\r\n"
+                  "Invalid HTTP request header line: \"Content-Length : 5\".")
+             (str/replace response #"Date: (.*?)\r\n" ""))
+          "Whitespace before the colon is rejected")
+      (is (not (str/includes? response "/admin"))
+          "The smuggled request does not reach the handler"))
+    (doseq [line [" folded: value" "\tfolded: value" "Bad(Name): value"]]
+      (let [response (raw-http-request
+                      "localhost" 4357
+                      (str "GET / HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           line "\r\n\r\n"))]
+        (is (str/starts-with? response "HTTP/1.1 400 Bad Request\r\n")
+            (str "The header line " (pr-str line) " is rejected"))))))
+
 (deftest file-response-body-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]
