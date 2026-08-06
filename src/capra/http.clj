@@ -142,6 +142,23 @@
 (defn- content-length [{:strs [content-length]}]
   (some-> content-length Long/parseLong))
 
+(def ^:private re-decimal #"\d+")
+
+(defn- parse-content-length
+  "Parse a Content-Length field value into a long, or return nil if it is not
+  the 1*DIGIT grammar of RFC 9112 section 6.2, or does not fit into a signed
+  64-bit integer."
+  [^String value]
+  (when (re-matches re-decimal value)
+    (try (Long/parseLong value) (catch NumberFormatException _ nil))))
+
+(defn- request-content-length
+  "Return the request's Content-Length as a long, `::invalid` if the field is
+  present but malformed, or nil if it is absent."
+  [{:strs [content-length]}]
+  (when content-length
+    (or (parse-content-length content-length) ::invalid)))
+
 (defn- chunked-transfer? [{:strs [transfer-encoding]}]
   (.equalsIgnoreCase "chunked" transfer-encoding))
 
@@ -385,7 +402,7 @@
       ::state    (handler socket)
       ::done     done
       ::chunked? (chunked-transfer? (:headers req))
-      ::length   (content-length (:headers req))})))
+      ::length   (request-content-length (:headers req))})))
 
 (defn- run-simple-handler [ring-handler request socket opts]
   (let [done    (volatile! false)
@@ -407,6 +424,8 @@
     {::step :error, ::error :unsupported-transfer-encoding, ::request request}
     (conflicting-framing? request)
     {::step :error, ::error :conflicting-request-framing, ::request request}
+    (= ::invalid (request-content-length (:headers request)))
+    {::step :error, ::error :invalid-content-length, ::request request}
     (not (contains? (:headers request) "host"))
     {::step :error, ::error :missing-host-header, ::request request}
     (empty-request-body? request)

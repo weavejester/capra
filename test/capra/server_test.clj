@@ -420,6 +420,42 @@
       (is (not (str/includes? response "/admin"))
           "The smuggled request does not reach the handler"))))
 
+(deftest invalid-content-length-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [uri]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (str "Handled " uri)})
+                 {:port 4352})]
+    (let [response (raw-http-request
+                    "localhost" 4352
+                    (str "POST / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Content-Length: -5\r\n\r\n"
+                         "GET /admin HTTP/1.1\r\n"
+                         "Host: localhost\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 400 Bad Request\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 49\r\n\r\n"
+                  "Invalid \"Content-Length\" header in request: \"-5\".")
+             (str/replace response #"Date: (.*?)\r\n" "")))
+      (is (not (str/includes? response "/admin"))
+          "The smuggled request does not reach the handler"))
+    (doseq [value ["+5" "0x5" "" "5 5" "abc" "99999999999999999999"]]
+      (let [response (raw-http-request
+                      "localhost" 4352
+                      (str "POST / HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Content-Length: " value "\r\n\r\n"
+                           "GET /admin HTTP/1.1\r\n"
+                           "Host: localhost\r\n\r\n"))]
+        (is (str/starts-with? response "HTTP/1.1 400 Bad Request\r\n")
+            (str "Content-Length: " (pr-str value) " is rejected"))
+        (is (not (str/includes? response "/admin"))
+            (str "Content-Length: " (pr-str value) " smuggles nothing"))))))
+
 (deftest missing-host-header-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]

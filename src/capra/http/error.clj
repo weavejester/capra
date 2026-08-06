@@ -23,6 +23,11 @@
     (plaintext-response
      400 (str "Both \"Content-Length\" and \"Transfer-Encoding\" headers in"
               " request.")))
+   :invalid-content-length
+   (fn [{{:strs [content-length]} :headers}]
+     (plaintext-response
+      400 (str "Invalid \"Content-Length\" header in request: \""
+               content-length "\".")))
    :missing-host-header
    (constantly (plaintext-response 400 "Missing \"Host\" header in request."))
    :http-version-not-supported
