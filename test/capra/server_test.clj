@@ -749,6 +749,62 @@
                (str/replace response #"Date: (.*?)\r\n" ""))
             "A body that does not close the sink is still terminated")))))
 
+(deftest head-request-test
+  (with-open [_ (capra/run-server
+                 (fn handler [_request]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4360})]
+    (let [strip #(str/replace % #"Date: (.*?)\r\n" "")
+          get*  (raw-http-request "localhost" 4360
+                                  (str "GET / HTTP/1.1\r\n"
+                                       "Host: localhost\r\n"
+                                       "Connection: close\r\n\r\n"))
+          head  (raw-http-request "localhost" 4360
+                                  (str "HEAD / HTTP/1.1\r\n"
+                                       "Host: localhost\r\n"
+                                       "Connection: close\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 200 OK\r\n"
+                  "Connection: close\r\n"
+                  "Server: Capra\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 11\r\n\r\n")
+             (strip head))
+          "A HEAD response has the headers of a GET response and no body")
+      (is (= (strip get*) (str (strip head) "Hello World"))))))
+
+(deftest bodyless-status-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [uri]}]
+                   (case uri
+                     "/204" {:status  204
+                             :headers {"Content-Length" "11"}
+                             :body    "Hello World"}
+                     "/304" {:status  304
+                             :headers {"ETag" "\"abc\""}
+                             :body    "Hello World"}))
+                 {:port 4361})]
+    (is (= (str "HTTP/1.1 204 No Content\r\n"
+                "Connection: close\r\n"
+                "Server: Capra\r\n\r\n")
+           (str/replace (raw-http-request "localhost" 4361
+                                          (str "GET /204 HTTP/1.1\r\n"
+                                               "Host: localhost\r\n"
+                                               "Connection: close\r\n\r\n"))
+                        #"Date: (.*?)\r\n" ""))
+        "A 204 response carries no framing fields and no body")
+    (is (= (str "HTTP/1.1 304 Not Modified\r\n"
+                "Connection: close\r\n"
+                "Server: Capra\r\n"
+                "ETag: \"abc\"\r\n\r\n")
+           (str/replace (raw-http-request "localhost" 4361
+                                          (str "GET /304 HTTP/1.1\r\n"
+                                               "Host: localhost\r\n"
+                                               "Connection: close\r\n\r\n"))
+                        #"Date: (.*?)\r\n" ""))
+        "A 304 response keeps its fields but carries no body")))
+
 (deftest file-response-body-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]

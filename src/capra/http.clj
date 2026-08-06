@@ -260,12 +260,21 @@
           (vreset! index (inc idx))
           (>= idx 2))))))
 
-(defn- write-known-length-to-socket [socket headers buffer writerf len callback]
+(def ^:private no-writer (constantly true))
+
+;; A HEAD response carries the header fields a GET response would, and no
+;; body, so the framing headers are written from the body's length as usual
+;; but the body writer itself is replaced with one that writes nothing.
+
+(defn- write-known-length-to-socket
+  [socket headers buffer writerf len head? callback]
   (cond
     (headers "content-length")
     (let [^long content-len (content-length headers)]
       (write-crlf buffer)
       (cond
+        head?
+        (run-writer no-writer socket buffer callback)
         (= content-len ^long len)
         (run-writer writerf socket buffer callback)
         (< content-len ^long len)
@@ -275,61 +284,65 @@
             (tcp/close socket))))
     (chunked-transfer? headers)
     (do (write-crlf buffer)
-        (run-writer (chunk-writer writerf len) socket buffer callback))
+        (run-writer (if head? no-writer (chunk-writer writerf len))
+                    socket buffer callback))
     :else
     (do (.put ^ByteBuffer buffer ^bytes length-header)
         (write-ascii buffer (str len))
         (write-crlf buffer)
         (write-crlf buffer)
-        (run-writer writerf socket buffer callback))))
+        (run-writer (if head? no-writer writerf) socket buffer callback))))
 
 (defprotocol ResponseBody
-  (write-body-to-socket [body response headers buffer socket async? callback]))
+  (write-body-to-socket
+    [body response headers buffer socket async? head? callback]))
 
 (extend (Class/forName "[B")
   ResponseBody
   {:write-body-to-socket
-   (fn [^bytes body _response headers buffer socket _async? callback]
+   (fn [^bytes body _response headers buffer socket _async? head? callback]
      (let [len     (alength body)
            writerf (bytes-writer body 0 len)]
        (write-known-length-to-socket socket headers buffer
-                                     writerf len callback)))})
+                                     writerf len head? callback)))})
 
 (extend-protocol ResponseBody
   String
-  (write-body-to-socket [body response headers buffer socket async? callback]
+  (write-body-to-socket [body response headers buffer socket async? head? cb]
     (let [^String charset (content-charset headers)
           body-bytes      (.getBytes body (or charset "UTF-8"))]
       (write-body-to-socket body-bytes response headers
-                            buffer socket async? callback)))
+                            buffer socket async? head? cb)))
   File
-  (write-body-to-socket [body _response headers buffer socket _async? callback]
+  (write-body-to-socket [body _response headers buffer socket _async? head? cb]
     (let [file-ch (.getChannel (FileInputStream. body))]
       (write-known-length-to-socket socket headers buffer (file-writer file-ch)
-                                    (.size file-ch) callback)))
+                                    (.size file-ch) head? cb)))
   Object
-  (write-body-to-socket [body response headers buffer socket _async? callback]
+  (write-body-to-socket
+    [body response headers buffer socket _async? head? callback]
     (when (and (nil? (headers "transfer-encoding"))
                (nil? (headers "content-length")))
       (.put ^ByteBuffer buffer ^bytes chunked-header))
     (write-crlf buffer)
     (.flip ^ByteBuffer buffer)
     (tcp/write socket buffer)
-    (let [out (stream/socket->output-stream socket
-                                            {:on-close (fn [_] (callback))})
-          out (if (chunked-response? headers)
-                (chunked-output-stream out)
-                (limited-output-stream out (content-length headers) socket))]
-      ;; ring.core.protocols/write-body-to-stream is synchronous whichever way
-      ;; the handler completes, so the sink is closed once it returns. Closing
-      ;; it is what writes the terminal chunk and resumes reads, and both
-      ;; wrappers tolerate a body that has already closed it.
-      (try (ring/write-body-to-stream body response out)
-           (finally (.close out)))))
+    (if head?
+      (callback)
+      (let [out (stream/socket->output-stream socket
+                                              {:on-close (fn [_] (callback))})
+            out (if (chunked-response? headers)
+                  (chunked-output-stream out)
+                  (limited-output-stream out (content-length headers) socket))]
+        ;; ring.core.protocols/write-body-to-stream is synchronous whichever
+        ;; way the handler completes, so the sink is closed once it returns.
+        ;; Closing it is what writes the terminal chunk and resumes reads, and
+        ;; both wrappers tolerate a body that has already closed it.
+        (try (ring/write-body-to-stream body response out)
+             (finally (.close out))))))
   nil
-  (write-body-to-socket [_body _response headers buffer socket _async? callback]
-    (let [writerf (constantly true)]
-      (write-known-length-to-socket socket headers buffer writerf 0 callback))))
+  (write-body-to-socket [_body _response headers buffer socket _async? head? cb]
+    (write-known-length-to-socket socket headers buffer no-writer 0 head? cb)))
 
 (defn- rfc-1123-date-time []
   (.format (ZonedDateTime/now ZoneOffset/UTC)
@@ -366,6 +379,11 @@
       (if (vector? value)
         (doseq [v value] (write-header buffer (key kv) v))
         (write-header buffer (key kv) value)))))
+
+(defn- write-no-body-to-socket [^ByteBuffer buffer socket callback]
+  (write-crlf buffer)
+  (tcp/write socket (.flip buffer))
+  (callback))
 
 (defn- get-cached [^ThreadLocal thread-local f]
   (or (.get thread-local)
@@ -408,6 +426,23 @@
    :headers {"Content-Type" "text/plain; charset=UTF-8"}
    :body    "Internal Server Error"})
 
+;; RFC 9112 sections 6.1 to 6.3: a 1xx or 204 response never carries a
+;; Content-Length or Transfer-Encoding field, and none of 1xx, 204 or 304
+;; carries a body.
+
+(defn- no-framing-status? [^long status]
+  (or (< status 200) (= status 204)))
+
+(defn- no-body-status? [^long status]
+  (or (no-framing-status? status) (= status 304)))
+
+(defn- framing-field? [name]
+  (or (.equalsIgnoreCase "content-length" name)
+      (.equalsIgnoreCase "transfer-encoding" name)))
+
+(defn- remove-framing-fields [headers]
+  (into {} (remove (comp framing-field? key)) headers))
+
 (def ^:private re-close-connection #"(?i)(^| *,)close( *,|$)")
 
 (defn- connection-close? [{:strs [connection]}]
@@ -425,17 +460,24 @@
                        (do (error-logger (ex-info "Invalid response"
                                                   {:response response}))
                            invalid-response))
-            body    (:body response)
-            buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-            headers (normalize-headers (:headers response))
-            close?  (connection-close? (:headers request))]
+            status   (:status response)
+            response (if (no-framing-status? status)
+                       (update response :headers remove-framing-fields)
+                       response)
+            head?    (= :head (:request-method request))
+            buffer   (get-cached response-buffer #(ByteBuffer/allocate buf-size))
+            headers  (normalize-headers (:headers response))
+            close?   (connection-close? (:headers request))
+            callback #(do (when (or close? (connection-close? headers))
+                            (tcp/close socket))
+                          (vreset! done true)
+                          (tcp/resume-reads socket))]
         (.clear ^ByteBuffer buffer)
         (write-response-head buffer response headers close?)
-        (write-body-to-socket body response headers buffer socket async?
-                              #(do (when (or close? (connection-close? headers))
-                                     (tcp/close socket))
-                                   (vreset! done true)
-                                   (tcp/resume-reads socket)))))))
+        (if (no-body-status? status)
+          (write-no-body-to-socket buffer socket callback)
+          (write-body-to-socket (:body response) response headers buffer socket
+                                async? head? callback))))))
 
 (defn- ring-raiser [request respond {:keys [error-handler error-logger]}]
   (fn [exception]
