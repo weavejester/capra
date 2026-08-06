@@ -33,6 +33,8 @@
     (plaintext-response 400 "Invalid chunk size in request body."))
    :missing-host-header
    (constantly (plaintext-response 400 "Missing \"Host\" header in request."))
+   :duplicate-host-header
+   (constantly (plaintext-response 400 "Multiple \"Host\" headers in request."))
    :http-version-not-supported
    (fn [{:keys [bad-protocol]}]
      (plaintext-response

@@ -90,7 +90,9 @@
   (if-pos [colon-index (.indexOf line COLON)]
     (let [name  (str/lower-case (subs line 0 colon-index))
           value (str/trim (subs line (inc colon-index)))]
-      (assoc! state :headers (assoc-request-header! headers name value)))
+      (if (and (= name "host") (headers name))
+        {::step :error, ::error :duplicate-host-header}
+        (assoc! state :headers (assoc-request-header! headers name value))))
     {::step    :error
      ::error   :invalid-request-header
      ::request {:bad-header line}}))
