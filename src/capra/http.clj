@@ -552,7 +552,7 @@
     (respond (errorf request) false)
     (when (::handler state) (close-response state nil))
     (tcp/close socket)
-    nil))
+    {::step :closed}))
 
 (defn tcp-handler
   "Create a TeensyP handler from a Ring handler."
