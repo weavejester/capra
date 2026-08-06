@@ -516,6 +516,38 @@
              (str/replace response #"Date: (.*?)\r\n" ""))
           "The trailer section is consumed, not parsed as a request"))))
 
+(deftest chunk-size-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [body]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (slurp body)})
+                 {:port 4355})]
+    (let [response (raw-http-request
+                    "localhost" 4355
+                    (str "POST / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Transfer-Encoding: chunked\r\n"
+                         "Connection: close\r\n\r\n"
+                         "5;name=value\r\nHello\r\n0\r\n\r\n"))]
+      (is (str/ends-with? response "\r\n\r\nHello")
+          "A chunk extension is ignored, not rejected"))
+    (doseq [size ["-5" "+5" "0x5" " 5" ""]]
+      (let [response (raw-http-request
+                      "localhost" 4355
+                      (str "POST / HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Transfer-Encoding: chunked\r\n\r\n"
+                           size "\r\nHello\r\n0\r\n\r\n"))]
+        (is (= (str "HTTP/1.1 400 Bad Request\r\n"
+                    "Server: Capra\r\n"
+                    "Connection: close\r\n"
+                    "Content-Type: text/plain; charset=UTF-8\r\n"
+                    "Content-Length: 35\r\n\r\n"
+                    "Invalid chunk size in request body.")
+               (str/replace response #"Date: (.*?)\r\n" ""))
+            (str "Chunk size " (pr-str size) " is rejected"))))))
+
 (deftest missing-host-header-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]

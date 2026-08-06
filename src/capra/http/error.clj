@@ -28,6 +28,9 @@
      (plaintext-response
       400 (str "Invalid \"Content-Length\" header in request: \""
                content-length "\".")))
+   :invalid-chunk-size
+   (constantly
+    (plaintext-response 400 "Invalid chunk size in request body."))
    :missing-host-header
    (constantly (plaintext-response 400 "Missing \"Host\" header in request."))
    :http-version-not-supported

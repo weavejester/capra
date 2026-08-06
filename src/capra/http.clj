@@ -443,22 +443,34 @@
     :else
     (run-streaming-handler ring-handler request socket opts)))
 
+(def ^:private re-chunk-size #"(?i)([0-9a-f]+)(?:;.*)?")
+
+(defn- parse-chunk-size
+  "Parse a chunk-size line into a long, or return nil if it does not match the
+  `chunk-size [ chunk-ext ]` grammar of RFC 9112 section 7.1. Any chunk
+  extension is ignored."
+  [^String line]
+  (when-some [[_ digits] (re-matches re-chunk-size line)]
+    (try (Long/parseLong digits 16) (catch NumberFormatException _ nil))))
+
 (defn- read-chunk!
   "Read the next chunk of a chunked request body, advancing the buffer past it.
   Returns a buffer limited to the chunk data, `::last-chunk` if the chunk size
-  was zero, or nil if the buffer does not yet hold the whole chunk. Only the
-  chunk-size line of the last chunk is consumed; what follows it is the trailer
-  section."
+  was zero, `::invalid` if the chunk size is malformed, or nil if the buffer
+  does not yet hold the whole chunk. Only the chunk-size line of the last chunk
+  is consumed; what follows it is the trailer section."
   [^ByteBuffer buffer]
   (let [chunked-buffer (.duplicate buffer)]
     (when-some [head (buf/read-line chunked-buffer StandardCharsets/US_ASCII)]
-      (let [start  (.position chunked-buffer)
-            length (Long/parseLong head 16)]
-        (if (zero? length)
-          (do (.position buffer start) ::last-chunk)
-          (when (<= (+ start length 2) (.limit buffer))
-            (.position buffer (+ start length 2))
-            (doto chunked-buffer (.limit (+ start length)))))))))
+      (if-some [length (parse-chunk-size head)]
+        (let [start        (.position chunked-buffer)
+              ^long length length]
+          (if (zero? length)
+            (do (.position buffer start) ::last-chunk)
+            (when (<= (+ start length 2) (.limit buffer))
+              (.position buffer (+ start length 2))
+              (doto chunked-buffer (.limit (+ start length))))))
+        ::invalid))))
 
 (defn- next-request [{::keys [done handler state]}]
   (handler state nil)
@@ -467,8 +479,9 @@
 (defn- read-chunked-body-stream
   [{::keys [handler state] :as st} socket buffer]
   (when-some [chunk (read-chunk! buffer)]
-    (if (= ::last-chunk chunk)
-      (assoc! st ::step :trailers)
+    (condp = chunk
+      ::last-chunk (assoc! st ::step :trailers)
+      ::invalid    (assoc! st ::step :error, ::error :invalid-chunk-size)
       (do (handler state socket chunk) st))))
 
 ;; The trailer section is read and discarded. It is not exposed to the handler,
