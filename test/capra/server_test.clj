@@ -3,7 +3,8 @@
             [clj-http.client :as http]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is]]
+            [ring.core.protocols]))
 
 (defn- raw-http-request [^String host ^long port ^String raw-request]
   (with-open [socket (java.net.Socket. host port)
@@ -719,6 +720,34 @@
                            "Connection: close\r\n\r\n"))]
         (is (str/starts-with? response "HTTP/1.1 599 Unknown\r\n")
             "A status with no known reason phrase is still written")))))
+
+(deftest async-streaming-response-body-test
+  (let [body (reify ring.core.protocols/StreamableResponseBody
+               (write-body-to-stream [_ _ out]
+                 (.write ^java.io.OutputStream out (.getBytes "Hello World"
+                                                              "UTF-8"))
+                 (.flush ^java.io.OutputStream out)))]
+    (with-open [_ (capra/run-server
+                   (fn handler [_request respond _raise]
+                     (future (respond {:status  200
+                                       :headers {"Content-Type" "text/plain"}
+                                       :body    body})))
+                   {:port 4359, :async? true})]
+      (let [response (raw-http-request
+                      "localhost" 4359
+                      (str "GET / HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Connection: close\r\n\r\n"))]
+        (is (= (str "HTTP/1.1 200 OK\r\n"
+                    "Connection: close\r\n"
+                    "Server: Capra\r\n"
+                    "Content-Type: text/plain\r\n"
+                    "Transfer-Encoding: chunked\r\n"
+                    "Connection: Transfer-Encoding\r\n\r\n"
+                    "B\r\nHello World\r\n"
+                    "0\r\n\r\n")
+               (str/replace response #"Date: (.*?)\r\n" ""))
+            "A body that does not close the sink is still terminated")))))
 
 (deftest file-response-body-test
   (with-open [_ (capra/run-server

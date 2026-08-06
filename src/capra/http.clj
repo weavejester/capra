@@ -144,16 +144,19 @@
            (.close out)))))))
 
 (defn- limited-output-stream ^OutputStream [^OutputStream out limit socket]
-  (let [limit (AtomicInteger. limit)]
+  (let [limit  (AtomicInteger. limit)
+        closed (volatile! false)]
     (stream/output-stream
      (fn write [^bytes b off ^long len]
        (let [len (min len (+ len (.addAndGet limit (- len))))]
          (when (pos? len)
            (.write out b off len))))
      (fn close []
-       (.close out)
-       (when (pos? (.get limit))
-         (tcp/close socket))))))
+       (when-not @closed
+         (vreset! closed true)
+         (.close out)
+         (when (pos? (.get limit))
+           (tcp/close socket)))))))
 
 (defn- content-length [{:strs [content-length]}]
   (some-> content-length Long/parseLong))
@@ -305,7 +308,7 @@
       (write-known-length-to-socket socket headers buffer (file-writer file-ch)
                                     (.size file-ch) callback)))
   Object
-  (write-body-to-socket [body response headers buffer socket async? callback]
+  (write-body-to-socket [body response headers buffer socket _async? callback]
     (when (and (nil? (headers "transfer-encoding"))
                (nil? (headers "content-length")))
       (.put ^ByteBuffer buffer ^bytes chunked-header))
@@ -317,9 +320,12 @@
           out (if (chunked-response? headers)
                 (chunked-output-stream out)
                 (limited-output-stream out (content-length headers) socket))]
+      ;; ring.core.protocols/write-body-to-stream is synchronous whichever way
+      ;; the handler completes, so the sink is closed once it returns. Closing
+      ;; it is what writes the terminal chunk and resumes reads, and both
+      ;; wrappers tolerate a body that has already closed it.
       (try (ring/write-body-to-stream body response out)
-           (finally
-             (when-not async? (.close out))))))
+           (finally (.close out)))))
   nil
   (write-body-to-socket [_body _response headers buffer socket _async? callback]
     (let [writerf (constantly true)]
