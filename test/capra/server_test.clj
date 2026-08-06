@@ -393,6 +393,33 @@
                  (select-keys [:status :headers :body])
                  (update :headers dissoc "Date")))))))
 
+(deftest conflicting-request-framing-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [uri]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (str "Handled " uri)})
+                 {:port 4351})]
+    (let [response (raw-http-request
+                    "localhost" 4351
+                    (str "POST / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Content-Length: 6\r\n"
+                         "Transfer-Encoding: chunked\r\n\r\n"
+                         "0\r\n\r\n"
+                         "GET /admin HTTP/1.1\r\n"
+                         "Host: localhost\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 400 Bad Request\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 65\r\n\r\n"
+                  "Both \"Content-Length\" and \"Transfer-Encoding\" headers"
+                  " in request.")
+             (str/replace response #"Date: (.*?)\r\n" "")))
+      (is (not (str/includes? response "/admin"))
+          "The smuggled request does not reach the handler"))))
+
 (deftest missing-host-header-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]

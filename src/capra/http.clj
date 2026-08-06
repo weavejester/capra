@@ -361,6 +361,10 @@
 (defn- valid-transfer-encoding? [{{encoding "transfer-encoding"} :headers}]
   (or (nil? encoding) (.equalsIgnoreCase "chunked" encoding)))
 
+(defn- conflicting-framing? [{:keys [headers]}]
+  (and (contains? headers "content-length")
+       (contains? headers "transfer-encoding")))
+
 (defn- ring->stream-handler [ring-handler request done opts]
   (stream/input-stream-handler
    (fn [in socket]
@@ -401,6 +405,8 @@
   (cond
     (not (valid-transfer-encoding? request))
     {::step :error, ::error :unsupported-transfer-encoding, ::request request}
+    (conflicting-framing? request)
+    {::step :error, ::error :conflicting-request-framing, ::request request}
     (not (contains? (:headers request) "host"))
     {::step :error, ::error :missing-host-header, ::request request}
     (empty-request-body? request)

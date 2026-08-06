@@ -18,6 +18,11 @@
    (constantly (plaintext-response 414 "URI too long."))
    :request-header-field-too-large
    (constantly (plaintext-response 431 "Request header field too large."))
+   :conflicting-request-framing
+   (constantly
+    (plaintext-response
+     400 (str "Both \"Content-Length\" and \"Transfer-Encoding\" headers in"
+              " request.")))
    :missing-host-header
    (constantly (plaintext-response 400 "Missing \"Host\" header in request."))
    :http-version-not-supported
