@@ -456,6 +456,40 @@
         (is (not (str/includes? response "/admin"))
             (str "Content-Length: " (pr-str value) " smuggles nothing"))))))
 
+(deftest duplicate-content-length-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [body]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (slurp body)})
+                 {:port 4353})]
+    (let [response (raw-http-request
+                    "localhost" 4353
+                    (str "POST / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Content-Length: 5\r\n"
+                         "Content-Length: 5\r\n"
+                         "Connection: close\r\n\r\n"
+                         "Hello"))]
+      (is (str/ends-with? response "\r\n\r\nHello")
+          "Identical repeated Content-Length fields collapse to one value"))
+    (let [response (raw-http-request
+                    "localhost" 4353
+                    (str "POST / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Content-Length: 5\r\n"
+                         "Content-Length: 6\r\n\r\n"
+                         "Hello"))]
+      (is (= (str "HTTP/1.1 400 Bad Request\r\n"
+                  "Server: Capra\r\n"
+                  "Connection: close\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 50\r\n\r\n"
+                  "Invalid \"Content-Length\" header in request: \"5,6\".")
+             (str/replace response #"Date: (.*?)\r\n" "")))
+      (is (not (str/includes? response "Hello"))
+          "The request body is not treated as a request"))))
+
 (deftest missing-host-header-test
   (with-open [_ (capra/run-server
                  (fn handler [_request]

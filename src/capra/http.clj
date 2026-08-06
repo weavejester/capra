@@ -144,13 +144,22 @@
 
 (def ^:private re-decimal #"\d+")
 
+(defn- collapse-duplicates
+  "Return the single member of a comma-separated field value, or nil if it has
+  more than one distinct member."
+  [^String value]
+  (let [values (distinct (str/split value #"," -1))]
+    (when (= 1 (count values)) (first values))))
+
 (defn- parse-content-length
   "Parse a Content-Length field value into a long, or return nil if it is not
   the 1*DIGIT grammar of RFC 9112 section 6.2, or does not fit into a signed
-  64-bit integer."
+  64-bit integer. Repeated fields have been joined with commas by then, and
+  collapse to one value if they are identical."
   [^String value]
-  (when (re-matches re-decimal value)
-    (try (Long/parseLong value) (catch NumberFormatException _ nil))))
+  (when-some [value (collapse-duplicates value)]
+    (when (re-matches re-decimal value)
+      (try (Long/parseLong value) (catch NumberFormatException _ nil)))))
 
 (defn- request-content-length
   "Return the request's Content-Length as a long, `::invalid` if the field is
