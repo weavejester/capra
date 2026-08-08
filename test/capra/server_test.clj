@@ -657,3 +657,23 @@
                   "Content-Length: 3\r\n\r\n"
                   "Bar")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest unknown-status-code-test
+  (with-open [_ (capra/run-server
+                 (fn handler [_request]
+                   {:status  555
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    "Hello World"})
+                 {:port 4351})]
+    (let [response (raw-http-request
+                    "localhost" 4351
+                    (str "GET / HTTP/1.1\r\n"
+                         "Host: localhost\r\n"
+                         "Connection: close\r\n\r\n"))]
+      (is (= (str "HTTP/1.1 555 Unknown\r\n"
+                  "Connection: close\r\n"
+                  "Server: Capra\r\n"
+                  "Content-Type: text/plain; charset=UTF-8\r\n"
+                  "Content-Length: 11\r\n\r\n"
+                  "Hello World")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))

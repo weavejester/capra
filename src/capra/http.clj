@@ -304,7 +304,7 @@
   [^ByteBuffer buffer {:keys [status]}]
   (doto buffer
     (.put ^bytes http-1-1) (write-ascii (str status))
-    (.put (byte SPACE))    (write-ascii (reason/status->reason status))
+    (.put (byte SPACE)) (write-ascii (reason/status->reason status "Unknown"))
     (write-crlf)))
 
 (defn- write-header [^ByteBuffer buffer k v]
