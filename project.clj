@@ -10,15 +10,15 @@
   :global-vars {*warn-on-reflection* true}
   :aliases {"bench" ["with-profile" "+bench" "run"]}
   :profiles
-  {:bench {:dependencies [[aleph "0.9.9"]
+  {:bench {:dependencies [[aleph "0.9.10"]
                           [com.s-exp/hirundo "1.0.0-alpha214"]
-                          [info.sunng/ring-jetty9-adapter "0.40.1"]
+                          [info.sunng/ring-jetty9-adapter "0.40.3"]
                           [io.github.robaho/httpserver "1.0.29"]
                           [luminus/ring-undertow-adapter "1.5.2"]
-                          [org.clojars.jj/ring-http-exchange "1.4.8"]
+                          [org.clojars.jj/ring-http-exchange "1.4.9"]
                           [ring/ring-jetty-adapter "1.15.5"]
                           [ring/ring-core "1.15.5"]
-                          [commons-io "2.21.0"]]
+                          [commons-io "2.22.0"]]
            :source-paths ["bench" "src"]
            :main capra.benchmark
            :global-vars {*warn-on-reflection* false}}
