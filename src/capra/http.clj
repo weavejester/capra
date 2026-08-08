@@ -11,7 +11,7 @@
   (:import [java.io File FileInputStream InputStream OutputStream]
            [java.net InetSocketAddress]
            [java.nio ByteBuffer]
-           [java.nio.channels FileChannel]
+           [java.nio.channels Channels FileChannel]
            [java.nio.charset StandardCharsets]
            [java.time ZoneOffset ZonedDateTime]
            [java.time.format DateTimeFormatter]
@@ -110,16 +110,27 @@
   (.put buffer (byte CR))
   (.put buffer (byte LF)))
 
+(defn- write-buffer-to-stream [^OutputStream out ^ByteBuffer buf ^long len]
+  (if (.hasArray buf)
+    (let [off (+ (.arrayOffset buf) (.position buf))]
+      (.write out (.array buf) off len)
+      (.position buf (.limit buf)))
+    (let [ch (Channels/newChannel out)]
+      (while (.hasRemaining buf)
+        (.write ch buf)))))
+
 (defn- chunked-output-stream ^OutputStream [^OutputStream out]
   (let [lock   (ReentrantLock.)
         closed (volatile! false)]
     (stream/output-stream
-     (fn write [^bytes b off len]
-       (let [header (ascii-bytes (format "%X\r\n" len))]
+     (fn write [^ByteBuffer buf]
+       (let [len    (.remaining buf)
+             header (ascii-bytes (format "%X\r\n" len))]
          (with-lock lock
            (.write out header)
-           (.write out b off len)
-           (.write out ^bytes crlf))))
+           (write-buffer-to-stream out buf len)
+           (.write out ^bytes crlf)
+           (+ (alength header) len 2))))
      (fn close []
        (with-lock lock
          (when-not @closed
@@ -130,10 +141,12 @@
 (defn- limited-output-stream ^OutputStream [^OutputStream out limit socket]
   (let [limit (AtomicInteger. limit)]
     (stream/output-stream
-     (fn write [^bytes b off ^long len]
-       (let [len (min len (+ len (.addAndGet limit (- len))))]
+     (fn write [^ByteBuffer buf]
+       (let [r   (.remaining buf)
+             len (min r (+ r (.addAndGet limit (- r))))]
          (when (pos? len)
-           (.write out b off len))))
+           (write-buffer-to-stream out buf len))
+         len))
      (fn close []
        (.close out)
        (when (pos? (.get limit))
