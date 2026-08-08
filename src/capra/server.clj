@@ -22,7 +22,7 @@
             :body    "Internal Server Error"}))
 
 (defn- default-error-logger [exception]
-  (locking *err* (binding [*out* *err*]) (prn exception)))
+  (locking *err* (binding [*out* *err*] (prn exception))))
 
 (defn- maybe-virtual-thread-executor  []
   (try (eval '(Executors/newVirtualThreadPerTaskExecutor))
