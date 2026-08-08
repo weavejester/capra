@@ -34,7 +34,7 @@ existing Java web servers, such as the [Ring Jetty Adapter][], or
 because they are heavily optimized, such as [http-kit][].
 
 Capra is written entirely in Clojure, and has only two dependencies:
-Ring Core Protocols and [TeensyP][], which is also written entirely[^3]
+Ring Core Protocols and [TeensyP][], which is also written entirely
 in Clojure. This has several advantages:
 
 1. The codebase is more concise, making it a flexible platform for
@@ -43,9 +43,6 @@ in Clojure. This has several advantages:
    Java API, such as Jetty.
 3. It can be more easily ported to Clojure-like environments that don't
    use the JVM.
-
-[^3]: Excepting a couple of interfaces that are used to avoid using
-`proxy` when creating custom `InputStream` and `OutputStream` classes.
 
 [ring jetty adapter]: https://ring-clojure.github.io/ring/ring.adapter.jetty.html
 [http-kit]: https://github.com/http-kit/http-kit
