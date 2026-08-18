@@ -677,3 +677,10 @@
                   "Content-Length: 11\r\n\r\n"
                   "Hello World")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
+
+(deftest multiple-close-test
+  (dotimes [_ 1000]
+    (with-open [_ (capra/run-server
+                   (constantly {:status 204})
+                   {:port 4352
+                    :reuse-address? true})])))
