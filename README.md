@@ -20,11 +20,11 @@ reasonable margin of the fastest Ring adapters.
 
 Add the following dependency to your deps.edn file:
 
-    dev.weavejester/capra {:mvn/version "0.1.3"}
+    dev.weavejester/capra {:mvn/version "0.1.4"}
 
 Or to your Leiningen project file:
 
-    [dev.weavejester/capra "0.1.3"]
+    [dev.weavejester/capra "0.1.4"]
 
 ## Rationale
 
