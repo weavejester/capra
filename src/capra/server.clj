@@ -57,6 +57,7 @@
   - `:error-logger` - a function that takes a single exception argument and
     logs it somehow (defaults to printing to *err*)
   - `:executor` - the ExecutorService to use for running handlers
+  - `:host` - the hostname or IP address to listen on (defaults to nil)
   - `:port` - the port number to listen on (defaults to 80)
   - `:read-buffer-size` - the size of the buffer to use when reading from the
     socket (defaults to 8K)

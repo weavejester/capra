@@ -87,6 +87,7 @@ method.
 | `:error-handler`        | An async Ring handler called on uncaught exceptions |         |
 | `:error-logger`         | A function that takes an exception and logs it      |         |
 | `:executor`             | An `ExecutorService` to use for handler calls       |         |
+| `:host`                 | The hostname or IP address to listen on             | nil     |
 | `:port`                 | The port number to listen on                        | 80      |
 | `:read-buffer-size`     | The size in bytes of the channel read buffer        | 8K      |
 | `:recv-buffer-size`     | The receive buffer size (i.e. the SO_RCVBUF option) |         |
