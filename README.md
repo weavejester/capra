@@ -97,6 +97,12 @@ method.
 | `:write-buffer-size`    | The size in bytes of the channel write buffer       | 32K     |
 | `:write-queue-size`     | The maximum number of writes that can be queued     | 64      |
 
+### Concurrency
+
+By default a virtual thread pool is used in Java 21 and above, while a
+fixed thread pool of 256 threads is used for earlier versions of Java.
+The `:executor` option can be supplied with a custom `ExecutorService`
+for more specific configuration.
 
 ## Performance
 
