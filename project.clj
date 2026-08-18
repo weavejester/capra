@@ -5,7 +5,8 @@
             :url "https://www.eclipse.org/legal/epl-2.0/"}
   :dependencies [[org.clojure/clojure "1.12.5"]
                  [dev.weavejester/teensyp "0.9.1"]
-                 [org.ring-clojure/ring-core-protocols "1.15.5"]]
+                 [org.ring-clojure/ring-core-protocols "1.15.5"]
+                 [org.ring-clojure/ring-websocket-protocols "1.15.5"]]
   :global-vars {*warn-on-reflection* true}
   :aliases {"bench" ["with-profile" "+bench" "run"]}
   :profiles

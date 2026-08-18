@@ -2,6 +2,7 @@
   "Internal functions for dealing with HTTP/1.1."
   (:require [capra.http.error :as err]
             [capra.http.reason :as reason]
+            [capra.websocket :as ws]
             [clojure.string :as str]
             [ring.core.protocols :as ring]
             [teensyp.buffer :as buf]
@@ -13,8 +14,10 @@
            [java.nio ByteBuffer]
            [java.nio.channels Channels FileChannel]
            [java.nio.charset StandardCharsets]
+           [java.security MessageDigest]
            [java.time ZoneOffset ZonedDateTime]
            [java.time.format DateTimeFormatter]
+           [java.util Base64]
            [java.util.concurrent.atomic AtomicInteger]
            [java.util.concurrent.locks ReentrantLock]))
 
@@ -359,20 +362,50 @@
 (defn- connection-close? [{:strs [connection]}]
   (when connection (.find (re-matcher re-close-connection connection))))
 
+(defn- write-http-response
+  [request {:keys [headers body] :as response} buffer socket async? next-state]
+  (let [headers (normalize-headers headers)
+        close?  (connection-close? (:headers request))]
+    (write-response-head buffer response headers close?)
+    (write-body-to-socket body response headers buffer socket async?
+                          #(do (when (or close? (connection-close? headers))
+                                 (tcp/close socket))
+                               (vreset! next-state (init-request socket))
+                               (tcp/resume-reads socket)))))
+
+(def ^:private ^:const sec-guid "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")
+
+(defn- sec-websocket-accept [key]
+  (let [bytes (-> (str key sec-guid) (.getBytes StandardCharsets/UTF_8))
+        hash  (-> (MessageDigest/getInstance "SHA-1") (.digest bytes))]
+    (-> (Base64/getEncoder) (.encodeToString hash))))
+
+(def ^:private switch-protocol-bytes
+  (ascii-bytes (str "HTTP/1.1 101 Switching Protocols\r\n"
+                    "Upgrade: websocket\r\n"
+                    "Connection: upgrade\r\n"
+                    "Sec-Websocket-Accept: ")))
+
+(defn- write-websocket-response
+  [{{:strs [sec-websocket-key]} :headers}
+   {:ring.websocket/keys [listener]}
+   ^ByteBuffer buffer socket next-state]
+  (.put buffer ^bytes switch-protocol-bytes)
+  (write-ascii buffer (sec-websocket-accept sec-websocket-key))
+  (write-crlf buffer)
+  (write-crlf buffer)
+  (tcp/write socket (.flip buffer)
+             #(vreset! next-state (ws/init-websocket listener))))
+
 (defn- ring-responder
-  [request socket handled done {buf-size :response-buffer-size}]
-  (fn respond [{:keys [headers body] :as response} async?]
+  [req socket handled next-state {buf-size :response-buffer-size}]
+  (fn respond [resp async?]
     (when (compare-and-set! handled false true)
-      (let [buffer  (get-cached response-buffer #(ByteBuffer/allocate buf-size))
-            headers (normalize-headers headers)
-            close?  (connection-close? (:headers request))]
+      (let [buffer (get-cached response-buffer #(ByteBuffer/allocate buf-size))]
         (.clear ^ByteBuffer buffer)
-        (write-response-head buffer response headers close?)
-        (write-body-to-socket body response headers buffer socket async?
-                              #(do (when (or close? (connection-close? headers))
-                                     (tcp/close socket))
-                                   (vreset! done true)
-                                   (tcp/resume-reads socket)))))))
+        (if (:ring.websocket/listener resp)
+          (write-websocket-response req resp buffer socket next-state)
+          (write-http-response req resp buffer socket async? next-state))))))
 
 (defn- ring-raiser [request respond {:keys [error-handler error-logger]}]
   (fn [exception]
@@ -393,26 +426,26 @@
    opts))
 
 (defn- run-streaming-handler [ring-handler request socket opts]
-  (let [done    (volatile! false)
-        req     (persistent! request)
-        handler (ring->stream-handler ring-handler req done opts)]
+  (let [next-state (volatile! nil)
+        req        (persistent! request)
+        handler    (ring->stream-handler ring-handler req next-state opts)]
     (transient
-     {::step     :body
-      ::handler  handler
-      ::state    (handler socket)
-      ::done     done
-      ::chunked? (chunked-transfer? (:headers req))
-      ::length   (content-length (:headers req))})))
+     {::step       :body
+      ::handler    handler
+      ::state      (handler socket)
+      ::next-state next-state
+      ::chunked?   (chunked-transfer? (:headers req))
+      ::length     (content-length (:headers req))})))
 
 (defn- run-simple-handler [ring-handler request socket opts]
-  (let [done    (volatile! false)
-        handled (atom false)
-        body    (InputStream/nullInputStream)
-        request (persistent! (assoc! request :body body))
-        respond (ring-responder request socket handled done opts)
-        raise   (ring-raiser request respond opts)]
+  (let [next-state (volatile! nil)
+        handled    (atom false)
+        body       (InputStream/nullInputStream)
+        request    (persistent! (assoc! request :body body))
+        respond    (ring-responder request socket handled next-state opts)
+        raise      (ring-raiser request respond opts)]
     (ring-handler request respond raise)
-    {::step :buffer, ::done done}))
+    {::step :buffer, ::next-state next-state}))
 
 (defn- empty-request-body? [{:keys [headers]}]
   (and (not (contains? headers "content-length"))
@@ -438,9 +471,9 @@
           (.position buffer (+ start length 2))
           (doto chunked-buffer (.limit (+ start length))))))))
 
-(defn- next-request [{::keys [done handler state]}]
+(defn- next-request [{::keys [next-state handler state]}]
   (handler state nil)
-  {::step :buffer, ::done done})
+  {::step :buffer, ::next-state next-state})
 
 (defn- read-chunked-body-stream
   [{::keys [handler state] :as st} socket buffer]
@@ -468,22 +501,18 @@
         (assoc! st ::length length)))
     (next-request st)))
 
-(defn- read-body-stream [{:keys [done] :as state} socket buffer]
+(defn- read-body-stream [{:keys [next-state] :as state} socket buffer]
   (cond
     (::length state)   (read-known-length-body-stream state socket buffer)
     (::chunked? state) (read-chunked-body-stream state socket buffer)
-    :else              {::step :buffer, ::done done}))
-
-(defn- buffer-reads [{::keys [done]} socket]
-  (when @done (init-request socket)))
+    :else              {::step :buffer, ::next-state next-state}))
 
 (defn- close-response [{::keys [handler state]} exception]
   (handler state exception))
 
 (defn- write-error-response [{::keys [error request]} socket opts]
-  (let [done    (volatile! false)
-        handled (atom false)
-        respond (ring-responder request socket handled done opts)
+  (let [handled (atom false)
+        respond (ring-responder request socket handled (volatile! nil) opts)
         handler (err/error-handlers error)]
     (respond (handler request) false)
     (tcp/close socket)
@@ -506,7 +535,8 @@
                      :headers    (read-header state buffer max-buf-size)
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
-                     :buffer     (buffer-reads state socket)
+                     :buffer     (deref (::next-state state))
+                     :websocket  (ws/read-websocket-frame state socket buffer)
                      :error      (write-error-response state socket opts)
                      nil)]
            (recur new-state)

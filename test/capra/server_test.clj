@@ -3,7 +3,9 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [hato.client :as http]))
+            [hato.client :as http]
+            [hato.websocket :as ws]
+            [ring.websocket.protocols :as rwp]))
 
 (defn- raw-http-request [^String host ^long port ^String raw-request]
   (with-open [socket (java.net.Socket. host port)
@@ -702,3 +704,20 @@
                     "[\"/foobar\" \"\"]")
                (str/replace response #"Date: (.*?)\r\n" "")))))))
 
+(deftest websocket-test
+  (let [messages (atom [])]
+    (with-open [_ (capra/run-server
+                   (fn handler [_request]
+                     {:ring.websocket/listener
+                      (reify rwp/Listener
+                        (on-open [_ _])
+                        (on-message [_ _ msg] (swap! messages conj msg))
+                        (on-pong [_ _ _])
+                        (on-error [_ _ _])
+                        (on-close [_ _ _ _]))})
+                   {:port 4354})]
+      (let [ws @(ws/websocket "ws://localhost:4354" {})]
+        (ws/send! ws "Hello World")
+        (ws/close! ws))
+      (Thread/sleep 10)
+      (is (= ["Hello World"] @messages)))))
