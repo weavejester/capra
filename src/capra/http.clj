@@ -22,6 +22,7 @@
 (def ^:private ^:const COLON 0x3A)
 (def ^:private ^:const CR 0x0D)
 (def ^:private ^:const LF 0x0A)
+(def ^:private ^:const QUESTIONMARK 0x3F)
 
 (defn- ascii-bytes ^bytes [^String s]
   (.getBytes s StandardCharsets/US_ASCII))
@@ -61,12 +62,15 @@
 (defn- parse-start-line [state ^String line]
   (if-pos [space1 (.indexOf line SPACE)
            space2 (.indexOf line SPACE (inc space1))]
-    (assoc! state
-            ::step          :headers
-            :request-method (keyword (str/lower-case (subs line 0 space1)))
-            :uri            (subs line (inc space1) space2)
-            :protocol       (subs line (inc space2))
-            :headers        (transient {}))
+    (let [query  (.indexOf line QUESTIONMARK (inc space1))
+          query? (and (> query space1) (< query space2))]
+      (assoc! state
+              ::step          :headers
+              :request-method (keyword (str/lower-case (subs line 0 space1)))
+              :uri            (subs line (inc space1) (if query? query space2))
+              :query-string   (when query? (subs line (inc query) space2))
+              :protocol       (subs line (inc space2))
+              :headers        (transient {})))
     {::step  :error
      ::error :invalid-request-start-line}))
 

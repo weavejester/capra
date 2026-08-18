@@ -684,3 +684,21 @@
                    (constantly {:status 204})
                    {:port 4352
                     :reuse-address? true})])))
+
+(deftest request-query-string-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [uri query-string]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain; charset=UTF-8"}
+                    :body    (pr-str [uri query-string])})
+                 {:port 4353})]
+    (let [response (http/get "http://localhost:4353/foobar?baz")]
+      (is (= {:status  200
+              :headers {"Connection"     "close"
+                        "Content-Type"   "text/plain; charset=UTF-8"
+                        "Content-Length" "17"
+                        "Server"         "Capra"}
+              :body    "[\"/foobar\" \"baz\"]"}
+             (-> response
+                 (select-keys [:status :headers :body])
+                 (update :headers dissoc "Date")))))))
