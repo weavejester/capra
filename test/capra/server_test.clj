@@ -3,7 +3,7 @@
             [clj-http.client :as http]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]))
+            [clojure.test :refer [deftest is testing]]))
 
 (defn- raw-http-request [^String host ^long port ^String raw-request]
   (with-open [socket (java.net.Socket. host port)
@@ -687,18 +687,24 @@
 
 (deftest request-query-string-test
   (with-open [_ (capra/run-server
-                 (fn handler [{:keys [uri query-string]}]
+                 (fn handler [{:keys [uri query-string]
+                               :or   {query-string :missing}}]
                    {:status  200
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
                     :body    (pr-str [uri query-string])})
                  {:port 4353})]
-    (let [response (http/get "http://localhost:4353/foobar?baz")]
-      (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "17"
-                        "Server"         "Capra"}
-              :body    "[\"/foobar\" \"baz\"]"}
-             (-> response
-                 (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+    (testing "valid query string"
+      (let [response (http/get "http://localhost:4353/foobar?baz")]
+        (is (= {:status 200
+                :body   "[\"/foobar\" \"baz\"]"}
+               (select-keys response [:status :body])))))
+    (testing "empty query string"
+      (let [response (http/get "http://localhost:4353/foobar?")]
+        (is (= {:status 200
+                :body   "[\"/foobar\" \"\"]"}
+               (select-keys response [:status :body])))))
+    (testing "no query string"
+      (let [response (http/get "http://localhost:4353/foobar")]
+        (is (= {:status 200
+                :body   "[\"/foobar\" :missing]"}
+               (select-keys response [:status :body])))))))

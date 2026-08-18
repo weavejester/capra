@@ -59,18 +59,22 @@
   [clauses then else]
   `(or (when-pos ~clauses ~then) ~else))
 
+(defn- request-keyword [s]
+  (keyword (str/lower-case s)))
+
 (defn- parse-start-line [state ^String line]
   (if-pos [space1 (.indexOf line SPACE)
            space2 (.indexOf line SPACE (inc space1))]
     (let [query  (.indexOf line QUESTIONMARK (inc space1))
           query? (and (> query space1) (< query space2))]
-      (assoc! state
-              ::step          :headers
-              :request-method (keyword (str/lower-case (subs line 0 space1)))
-              :uri            (subs line (inc space1) (if query? query space2))
-              :query-string   (when query? (subs line (inc query) space2))
-              :protocol       (subs line (inc space2))
-              :headers        (transient {})))
+      (-> state
+          (assoc! ::step :headers)
+          (assoc! :request-method (request-keyword (subs line 0 space1)))
+          (assoc! :uri (subs line (inc space1) (if query? query space2)))
+          (cond-> query?
+            (assoc! :query-string (subs line (inc query) space2)))
+          (assoc! :protocol (subs line (inc space2)))
+          (assoc! :headers (transient {}))))
     {::step  :error
      ::error :invalid-request-start-line}))
 
