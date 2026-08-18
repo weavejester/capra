@@ -83,7 +83,7 @@ method.
 |-------------------------|-----------------------------------------------------|---------|
 | `:async?`               | Whether to use 3-arity asynchronous Ring handlers   | false   |
 | `:control-queue-size`   | The max number of queued control events             | 32      |
-| `:direct-read-buffer?`  | Allocate a direct ByteBuffer for reads              | false   |
+| `:direct-read-buffer?`  | Allocate a direct ByteBuffer for reads              | true    |
 | `:error-handler`        | An async Ring handler called on uncaught exceptions |         |
 | `:error-logger`         | A function that takes an exception and logs it      |         |
 | `:executor`             | An `ExecutorService` to use for handler calls       |         |
