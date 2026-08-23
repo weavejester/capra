@@ -711,13 +711,17 @@
                      {:ring.websocket/listener
                       (reify rwp/Listener
                         (on-open [_ _])
-                        (on-message [_ _ msg] (swap! messages conj msg))
+                        (on-message [_ _ msg]
+                          (swap! messages conj [:message msg]))
                         (on-pong [_ _ _])
                         (on-error [_ _ _])
-                        (on-close [_ _ _ _]))})
+                        (on-close [_ _ code reason]
+                          (swap! messages conj [:exit code reason])))})
                    {:port 4354})]
       (let [ws @(ws/websocket "ws://localhost:4354" {})]
         (ws/send! ws "Hello World")
-        (ws/close! ws))
+        (ws/close! ws 1000 "Normal exit"))
       (Thread/sleep 10)
-      (is (= ["Hello World"] @messages)))))
+      (is (= [[:message "Hello World"]
+              [:exit 1000 "Normal exit"]]
+             @messages)))))

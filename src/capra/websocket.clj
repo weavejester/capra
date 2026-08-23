@@ -73,14 +73,28 @@
       (assoc! state ::step (if (::finished? state) :complete :fin+opcode)))))
 
 (defn- buffer->utf-8 [^ByteBuffer buf]
-  (String. (.array buf) StandardCharsets/UTF_8))
+  (String. (.array buf) (.arrayOffset buf) (.limit buf) StandardCharsets/UTF_8))
 
-(defn- deliver-message [{::keys [listener opcode payload]} socket]
+(defn- on-text [{::keys [listener payload]} socket]
+  (ws/on-message listener socket (buffer->utf-8 payload)))
+
+(defn- on-binary [{::keys [listener ^ByteBuffer payload]} socket]
+  (ws/on-message listener socket (.flip payload)))
+
+(defn- on-close [{::keys [listener ^ByteBuffer payload]} socket]
+  (let [exit-code (-> payload .flip .getShort)
+        reason    (-> payload .slice buffer->utf-8)]
+    (ws/on-close listener socket exit-code reason)))
+
+(defn- on-pong [{::keys [listener ^ByteBuffer payload]} socket]
+  (ws/on-pong listener socket (.flip payload)))
+
+(defn- deliver-message [{::keys [opcode listener] :as state} socket]
   (case (byte opcode)
-    0x1 (ws/on-message listener socket (buffer->utf-8 payload))
-    0x2 (ws/on-message listener socket payload)
-    0x8 (ws/on-close   listener socket 1000 "")
-    0xA (ws/on-pong    listener socket payload))
+    0x1 (on-text   state socket)
+    0x2 (on-binary state socket)
+    0x8 (on-close  state socket) 
+    0xA (on-pong   state socket))
   (init-websocket listener))
 
 (defn read-websocket-frame [state socket buffer]
