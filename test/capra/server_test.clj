@@ -1,9 +1,9 @@
 (ns capra.server-test
   (:require [capra.server :as capra]
-            [clj-http.client :as http]
             [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]))
+            [clojure.test :refer [deftest is testing]]
+            [hato.client :as http]))
 
 (defn- raw-http-request [^String host ^long port ^String raw-request]
   (with-open [socket (java.net.Socket. host port)
@@ -26,16 +26,15 @@
                  {:port 4321})]
     (let [response (http/get "http://localhost:4321")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "11"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "11"
+                        "server"         "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date"))))
+                 (update :headers dissoc "date"))))
       (is (re-matches #"\w{3}, \d+ \w{3} \d{4} \d\d:\d\d:\d\d GMT"
-                      (get-in response [:headers "Date"]))))))
+                      (get-in response [:headers "date"]))))))
 
 (deftest response-content-length-test
   (with-open [_ (capra/run-server
@@ -47,14 +46,13 @@
                  {:port 4322})]
     (let [response (http/get "http://localhost:4322")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain"
-                        "Content-Length" "11"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain"
+                        "content-length" "11"
+                        "server"         "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest request-with-content-length-test
   (with-open [_ (capra/run-server
@@ -68,14 +66,13 @@
                               {:headers {"Content-Type" "text/plain"}
                                :body "Hello World"})]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain"
-                        "Content-Length" "11"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain"
+                        "content-length" "11"
+                        "server"         "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest multiple-response-headers-test
   (with-open [_ (capra/run-server
@@ -86,12 +83,11 @@
                     :body    "Hello World"})
                  {:port 4324})]
     (let [response (http/get "http://localhost:4324")]
-      (is (= {"Connection"     "close"
-              "Content-Type"   "text/plain; charset=UTF-8"
-              "Content-Length" "11"
-              "Server"         "Capra"
-              "X-Example"      ["foo" "bar"]}
-             (-> response :headers (dissoc "Date")))))))
+      (is (= {"content-type"   "text/plain; charset=UTF-8"
+              "content-length" "11"
+              "server"         "Capra"
+              "x-example"      ["foo" "bar"]}
+             (-> response :headers (dissoc "date")))))))
 
 (deftest byte-array-response-body-test
   (with-open [_ (capra/run-server
@@ -102,14 +98,13 @@
                  {:port 4325})]
     (let [response (http/get "http://localhost:4325")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "11"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "11"
+                        "server"         "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest large-byte-array-response-body-test
   (let [large-body (apply str (repeat 100 "Hello World\n"))]
@@ -122,14 +117,13 @@
                     :response-buffer-size 200})]
       (let [response (http/get "http://localhost:4326")]
         (is (= {:status  200
-                :headers {"Connection"     "close"
-                          "Content-Type"   "text/plain; charset=UTF-8"
-                          "Content-Length" "1200"
-                          "Server"         "Capra"}
+                :headers {"content-type"   "text/plain; charset=UTF-8"
+                          "content-length" "1200"
+                          "server"         "Capra"}
                 :body    large-body}
                (-> response
                    (select-keys [:status :headers :body])
-                   (update :headers dissoc "Date"))))))))
+                   (update :headers dissoc "date"))))))))
 
 (deftest large-chunked-array-response-body-test
   (let [large-body (apply str (repeat 100 "Hello World\n"))]
@@ -143,14 +137,13 @@
                     :response-buffer-size 200})]
       (let [response (http/get "http://localhost:4327")]
         (is (= {:status  200
-                :headers {"Connection"        "close"
-                          "Content-Type"      "text/plain; charset=UTF-8"
-                          "Transfer-Encoding" "chunked"
-                          "Server"            "Capra"}
+                :headers {"content-type"      "text/plain; charset=UTF-8"
+                          "transfer-encoding" "chunked"
+                          "server"            "Capra"}
                 :body    large-body}
                (-> response
                    (select-keys [:status :headers :body])
-                   (update :headers dissoc "Date"))))))))
+                   (update :headers dissoc "date"))))))))
 
 (deftest persistent-connection-test
   (with-open [_ (capra/run-server
@@ -159,20 +152,21 @@
                     :headers {"Content-Type" "text/plain; charset=UTF-8"}
                     :body    "Hello World"})
                  {:port 4328})]
-    (http/with-connection-pool {:max-total 1 :default-per-route 1}
-      (let [responses (->> (repeatedly 10 #(http/get "http://localhost:4328"))
-                           (doall)
-                           (map #(-> %
-                                     (select-keys [:status :headers :body])
-                                     (update :headers dissoc "Date"))))]
-        (is (= 10 (count responses)))
-        (is (= 1 (count (distinct responses))))
-        (is (= {:status  200
-                :headers {"Content-Type"      "text/plain; charset=UTF-8"
-                          "Content-Length"    "11"
-                          "Server"            "Capra"}
-                :body    "Hello World"}
-               (first responses)))))))
+    (let [client    (http/build-http-client {:connect-timeout 10000})
+          http-get  #(http/get "http://localhost:4328" {:http-client client})
+          responses (->> (repeatedly 10 http-get)
+                         (doall)
+                         (map #(-> %
+                                   (select-keys [:status :headers :body])
+                                   (update :headers dissoc "date"))))]
+      (is (= 10 (count responses)))
+      (is (= 1 (count (distinct responses))))
+      (is (= {:status  200
+              :headers {"content-type"      "text/plain; charset=UTF-8"
+                        "content-length"    "11"
+                        "server"            "Capra"}
+              :body    "Hello World"}
+             (first responses))))))
 
 (deftest respond-multiple-calls-test
   (with-open [_ (capra/run-server
@@ -189,14 +183,13 @@
                   :async? true})]
     (let [response (http/get "http://localhost:4329")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "5"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "5"
+                        "server"         "Capra"}
               :body    "Hello"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest exception-in-handler-test
   (let [logs (atom [])]
@@ -206,16 +199,15 @@
                    {:port 4330
                     :error-logger #(swap! logs conj (ex-message %))})]
       (let [response (http/get "http://localhost:4330"
-                               {:throw-exceptions false})]
+                               {:throw-exceptions? false})]
         (is (= {:status  500
-                :headers {"Connection"     "close"
-                          "Content-Type"   "text/plain; charset=UTF-8"
-                          "Content-Length" "21"
-                          "Server"         "Capra"}
+                :headers {"content-type"   "text/plain; charset=UTF-8"
+                          "content-length" "21"
+                          "server"         "Capra"}
                 :body    "Internal Server Error"}
                (-> response
                    (select-keys [:status :headers :body])
-                   (update :headers dissoc "Date"))))
+                   (update :headers dissoc "date"))))
         (is (= ["Error"] @logs))))))
 
 (deftest nil-response-body-test
@@ -227,14 +219,13 @@
     (let [response (http/get "http://localhost:4331"
                              {:redirect-strategy :none})]
       (is (= {:status  301
-              :headers {"Connection"     "close"
-                        "Content-Length" "0"
-                        "Location"       "http://example.com"
-                        "Server"         "Capra"}
+              :headers {"content-length" "0"
+                        "location"       "http://example.com"
+                        "server"         "Capra"}
               :body    ""}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest bad-user-content-length-test
   (with-open [_ (capra/run-server
@@ -246,14 +237,13 @@
                  {:port 4332})]
     (let [response (http/get "http://localhost:4332")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "10"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "10"
+                        "server"         "Capra"}
               :body    "Hello Worl"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))
+                 (update :headers dissoc "date")))
           "Shorter Content-Length cuts off body")))
   (with-open [_ (capra/run-server
                  (fn handler [_request]
@@ -265,14 +255,13 @@
                  {:port 4333})]
     (let [response (http/get "http://localhost:4333")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "10"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "10"
+                        "server"         "Capra"}
               :body    "Hello Worl"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))
+                 (update :headers dissoc "date")))
           "Shorter Content-Length cuts off body")))
   (with-open [_ (capra/run-server
                  (fn handler [_request]
@@ -281,8 +270,8 @@
                               "Content-Length" "12"}
                     :body    "Hello World"})
                  {:port 4334})]
-    (is (thrown-with-msg? org.apache.http.ConnectionClosedException
-                          #"Premature end of Content-Length"
+    (is (thrown-with-msg? java.io.IOException
+                          #"closed"
                           (http/get "http://localhost:4334"))
         "Longer Content-Length immediately closes"))
   (with-open [_ (capra/run-server
@@ -293,8 +282,8 @@
                     :body    (java.io.ByteArrayInputStream.
                               (.getBytes "Hello World" "UTF-8"))})
                  {:port 4335})]
-    (is (thrown-with-msg? org.apache.http.ConnectionClosedException
-                          #"Premature end of Content-Length"
+    (is (thrown-with-msg? java.io.IOException
+                          #"closed"
                           (http/get "http://localhost:4335"))
         "Longer Content-Length immediately closes"))
   (with-open [_ (capra/run-server
@@ -302,8 +291,8 @@
                    {:status  200
                     :headers {"Content-Length" "1"}})
                  {:port 4336})]
-    (is (thrown-with-msg? org.apache.http.ConnectionClosedException
-                          #"Premature end of Content-Length"
+    (is (thrown-with-msg? java.io.IOException
+                          #"closed"
                           (http/get "http://localhost:4336"))
         "Longer Content-Length immediately closes")))
 
@@ -360,16 +349,16 @@
                   :read-buffer-size 200})]
     (let [long-uri (apply str (repeat 100 "foobar"))
           response (http/get (str "http://localhost:4339/" long-uri)
-                             {:throw-exceptions false})]
+                             {:throw-exceptions? false})]
       (is (= {:status  414
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "13"
-                        "Server"         "Capra"}
+              :headers {"connection"     "close"
+                        "content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "13"
+                        "server"         "Capra"}
               :body    "URI too long."}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest too-large-header-test
   (with-open [_ (capra/run-server
@@ -381,17 +370,17 @@
                   :read-buffer-size 200})]
     (let [long-header (apply str (repeat 100 "foobar"))
           response    (http/get "http://localhost:4340/"
-                                {:throw-exceptions false
+                                {:throw-exceptions? false
                                  :headers {"Long-Header" long-header}})]
       (is (= {:status  431
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "31"
-                        "Server"         "Capra"}
+              :headers {"connection"     "close"
+                        "content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "31"
+                        "server"         "Capra"}
               :body    "Request header field too large."}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest missing-host-header-test
   (with-open [_ (capra/run-server
@@ -481,14 +470,13 @@
                  {:port 4342})]
     (let [response (http/get "http://localhost:4342")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "12"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "12"
+                        "server"         "Capra"}
               :body    "Hello World\n"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest multiple-request-headers-test
   (with-open [_ (capra/run-server
@@ -500,14 +488,13 @@
     (let [response (http/get "http://localhost:4343/"
                              {:headers {"Test-Header" ["One" "Two" "Three"]}})]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "15"
-                        "Server"         "Capra"}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "15"
+                        "server"         "Capra"}
               :body    "\"One,Two,Three\""}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest multiple-connection-headers-test
   (with-open [_ (capra/run-server
@@ -540,14 +527,14 @@
                  {:port 4345})]
     (let [response (http/get "http://localhost:4345")]
       (is (= {:status  200
-              :headers {"Connection"        ["close" "Transfer-Encoding"]
-                        "Content-Type"      "text/plain; charset=UTF-8"
-                        "Transfer-Encoding" "chunked"
-                        "Server"            "Capra"}
+              :headers {"connection"        "Transfer-Encoding"
+                        "content-type"      "text/plain; charset=UTF-8"
+                        "transfer-encoding" "chunked"
+                        "server"            "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest large-file-response-body-test
   (with-open [_ (capra/run-server
@@ -559,13 +546,12 @@
     (let [response (http/get "http://localhost:4346"
                              {:as :byte-array})]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Type"   "text/plain; charset=UTF-8"
-                        "Content-Length" "707328"
-                        "Server"         "Capra"}}
+              :headers {"content-type"   "text/plain; charset=UTF-8"
+                        "content-length" "707328"
+                        "server"         "Capra"}}
              (-> response
                  (select-keys [:status :headers])
-                 (update :headers dissoc "Date"))))
+                 (update :headers dissoc "date"))))
       (is (= "af779e68245bad2adc3e2537103b7a898e2a068d5ebbee5c30ef0b217a1c8199"
              (sha256sum (:body response)))))))
 
@@ -577,14 +563,13 @@
     (with-open [_ (capra/run-server handler :port 4347)]
       (let [response (http/get "http://localhost:4347")]
         (is (= {:status  200
-                :headers {"Connection"     "close"
-                          "Content-Type"   "text/plain; charset=UTF-8"
-                          "Content-Length" "11"
-                          "Server"         "Capra"}
+                :headers {"content-type"   "text/plain; charset=UTF-8"
+                          "content-length" "11"
+                          "server"         "Capra"}
                 :body    "Hello World"}
                (-> response
                    (select-keys [:status :headers :body])
-                   (update :headers dissoc "Date"))))))))
+                   (update :headers dissoc "date"))))))))
 
 (deftest request-with-chunked-body-test
   (with-open [_ (capra/run-server
@@ -595,13 +580,13 @@
                               {:body (java.io.ByteArrayInputStream.
                                       (.getBytes "Hello World" "UTF-8"))})]
       (is (= {:status  200
-              :headers {"Connection"        ["close" "Transfer-Encoding"]
-                        "Transfer-Encoding" "chunked"
-                        "Server"            "Capra"}
+              :headers {"connection"        "Transfer-Encoding"
+                        "transfer-encoding" "chunked"
+                        "server"            "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest response-without-content-type-test
   (with-open [_ (capra/run-server
@@ -612,13 +597,12 @@
                  {:port 4349})]
     (let [response (http/get "http://localhost:4349")]
       (is (= {:status  200
-              :headers {"Connection"     "close"
-                        "Content-Length" "11"
-                        "Server"         "Capra"}
+              :headers {"content-length" "11"
+                        "server"         "Capra"}
               :body    "Hello World"}
              (-> response
                  (select-keys [:status :headers :body])
-                 (update :headers dissoc "Date")))))))
+                 (update :headers dissoc "date")))))))
 
 (deftest pipelined-requests-test
   (with-open [_ (capra/run-server
@@ -698,13 +682,23 @@
         (is (= {:status 200
                 :body   "[\"/foobar\" \"baz\"]"}
                (select-keys response [:status :body])))))
-    (testing "empty query string"
-      (let [response (http/get "http://localhost:4353/foobar?")]
-        (is (= {:status 200
-                :body   "[\"/foobar\" \"\"]"}
-               (select-keys response [:status :body])))))
     (testing "no query string"
       (let [response (http/get "http://localhost:4353/foobar")]
         (is (= {:status 200
                 :body   "[\"/foobar\" :missing]"}
-               (select-keys response [:status :body])))))))
+               (select-keys response [:status :body])))))
+    ;; Hato doesn't handle empty query strings correctly.
+    (testing "empty query string"
+      (let [response (raw-http-request
+                      "localhost" 4353
+                      (str "GET /foobar? HTTP/1.1\r\n"
+                           "Host: localhost\r\n"
+                           "Connection: close\r\n\r\n"))]
+        (is (= (str "HTTP/1.1 200 OK\r\n"
+                    "Connection: close\r\n"
+                    "Server: Capra\r\n"
+                    "Content-Type: text/plain; charset=UTF-8\r\n"
+                    "Content-Length: 14\r\n\r\n"
+                    "[\"/foobar\" \"\"]")
+               (str/replace response #"Date: (.*?)\r\n" "")))))))
+

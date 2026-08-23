@@ -22,6 +22,6 @@
            :main capra.benchmark
            :global-vars {*warn-on-reflection* false}}
    :nrepl {:plugins [[cider/cider-nrepl "0.59.0"]]}
-   :dev   {:dependencies [[clj-http "3.13.1"]
+   :dev   {:dependencies [[hato "1.0.0"]
                           [http-kit "2.8.1"]
                           [criterium "0.4.6"]]}})
