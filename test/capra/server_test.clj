@@ -705,23 +705,30 @@
                (str/replace response #"Date: (.*?)\r\n" "")))))))
 
 (deftest websocket-test
-  (let [messages (atom [])]
+  (let [received (atom [])
+        sent     (atom [])]
     (with-open [_ (capra/run-server
                    (fn handler [_request]
                      {:ring.websocket/listener
                       (reify rwp/Listener
                         (on-open [_ _])
-                        (on-message [_ _ msg]
-                          (swap! messages conj [:message msg]))
+                        (on-message [_ sock msg]
+                          (swap! received conj [:message msg])
+                          (rwp/-send sock msg))
                         (on-pong [_ _ _])
                         (on-error [_ _ _])
                         (on-close [_ _ code reason]
-                          (swap! messages conj [:exit code reason])))})
+                          (swap! received conj [:exit code reason])))})
                    {:port 4354})]
-      (let [ws @(ws/websocket "ws://localhost:4354" {})]
+      (let [ws @(ws/websocket "ws://localhost:4354"
+                              {:on-message
+                               (fn [_ msg _]
+                                 (swap! sent conj [:message (str msg)]))})]
         (ws/send! ws "Hello World")
         (ws/close! ws 1000 "Normal exit"))
       (Thread/sleep 10)
       (is (= [[:message "Hello World"]
               [:exit 1000 "Normal exit"]]
-             @messages)))))
+             @received))
+      (is (= [[:message "Hello World"]]
+             @sent)))))

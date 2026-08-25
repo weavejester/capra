@@ -1,7 +1,53 @@
 (ns capra.websocket
-  (:require [ring.websocket.protocols :as ws])
+  (:require [ring.websocket.protocols :as ws]
+            [teensyp.server :as tcp])
   (:import [java.nio ByteBuffer]
-           [java.nio.charset StandardCharsets]))
+           [java.nio.charset StandardCharsets]
+           [java.nio.channels SelectionKey]))
+
+(defn- put-payload-length [^ByteBuffer buf len]
+  (cond
+    (< len 126)   (.put buf (unchecked-byte len))
+    (< len 65536) (do (.put buf (unchecked-byte 126))
+                      (.putShort buf (unchecked-short len)))
+    :else         (do (.put buf (unchecked-byte 127))
+                      (.putLong buf len))))
+
+(defn- frame-header [^long opcode ^ByteBuffer payload]
+  (doto (ByteBuffer/allocate 14)
+    (.put (unchecked-byte (bit-or 0x80 opcode)))
+    (put-payload-length (.remaining payload))
+    (.flip)))
+
+(defn- send-message [socket ^long opcode ^ByteBuffer payload]
+  (tcp/write socket (frame-header opcode payload))
+  (tcp/write socket payload))
+
+(defn- utf-8->buffer [^String s]
+  (ByteBuffer/wrap (.getBytes s StandardCharsets/UTF_8)))
+
+(defn- close-message [^long code ^String reason]
+  (let [bs  (.getBytes reason StandardCharsets/UTF_8)
+        buf (ByteBuffer/allocate (+ 2 (alength bs)))]
+    (doto buf
+      (.putShort (unchecked-short code))
+      (.put bs)
+      (.flip))))
+
+(extend-protocol ws/Socket
+  SelectionKey
+  (-open? [socket] (.isValid socket))
+  (-send [socket message]
+    (if (string? message)
+      (send-message socket 0x1 (utf-8->buffer message))
+      (send-message socket 0x2 message)))
+  (-ping [socket message]
+    (send-message socket 0x9 message))
+  (-pong [socket message]
+    (send-message socket 0xA message))
+  (-close [socket code reason]
+    (send-message socket 0x8 (close-message code reason))
+    (tcp/close socket)))
 
 (defn init-websocket [listener]
   (transient {:capra.http/step :websocket
@@ -55,12 +101,12 @@
           (assoc! ::mask mask)
           (assoc! ::step :payload)))))
 
-(defn- put-masked [^ByteBuffer payload ^ByteBuffer buffer ^bytes mask]
-  (let [pos   (.position payload)
-        limit (+ pos (.remaining buffer))]
+(defn- put-masked [^ByteBuffer dest ^ByteBuffer src ^bytes mask]
+  (let [pos   (.position dest)
+        limit (+ pos (.remaining src))]
     (loop [i pos]
       (when (< i limit)
-        (.put payload (byte (bit-xor (.get buffer) (aget mask (mod i 4)))))
+        (.put dest (byte (bit-xor (.get src) (aget mask (mod i 4)))))
         (recur (inc i))))))
 
 (defn- read-payload [state ^ByteBuffer buffer]
@@ -93,7 +139,7 @@
   (case (byte opcode)
     0x1 (on-text   state socket)
     0x2 (on-binary state socket)
-    0x8 (on-close  state socket) 
+    0x8 (on-close  state socket)
     0xA (on-pong   state socket))
   (init-websocket listener))
 
