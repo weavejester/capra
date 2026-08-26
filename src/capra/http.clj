@@ -51,6 +51,9 @@
                 :server-name (.getHostString local)
                 :remote-addr (.getHostString remote)})))
 
+(defn- init-websocket [listener]
+  (transient {::step :websocket, ::state (ws/init-websocket listener)}))
+
 (defmacro ^:private when-pos [[sym expr & clauses] & body]
   `(let [~sym ~expr]
      (if (pos? ~sym)
@@ -395,7 +398,7 @@
   (write-crlf buffer)
   (write-crlf buffer)
   (tcp/write socket (.flip buffer)
-             #(vreset! next-state (ws/init-websocket listener))))
+             #(vreset! next-state (init-websocket listener))))
 
 (defn- ring-responder
   [req socket handled next-state {buf-size :response-buffer-size}]
@@ -518,6 +521,10 @@
     (tcp/close socket)
     nil))
 
+(defn- read-websocket-frame [{::keys [state] :as st} socket buffer]
+  (when-some [new-state (ws/read-websocket-frame state socket buffer)]
+    (assoc! st ::state new-state)))
+
 (defn tcp-handler
   "Create a TeensyP handler from a Ring handler."
   [handler {:keys [error-logger stream-buffer-size]
@@ -536,7 +543,7 @@
                      :handler    (run-ring-handler handler state socket opts)
                      :body       (read-body-stream state socket buffer)
                      :buffer     (deref (::next-state state))
-                     :websocket  (ws/read-websocket-frame state socket buffer)
+                     :websocket  (read-websocket-frame state socket buffer)
                      :error      (write-error-response state socket opts)
                      nil)]
            (recur new-state)

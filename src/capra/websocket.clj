@@ -50,9 +50,7 @@
     (tcp/close socket)))
 
 (defn init-websocket [listener]
-  (transient {:capra.http/step :websocket
-              ::step           :fin+opcode
-              ::listener       listener}))
+  (transient {::step :fin+opcode, ::listener listener}))
 
 (defn- high-bit? [^long b]
   (not (zero? (bit-and b 0x80))))
