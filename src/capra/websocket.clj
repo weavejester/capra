@@ -137,11 +137,16 @@
 (defn- on-pong [{::keys [listener ^ByteBuffer payload]} socket]
   (ws/on-pong listener socket (.flip payload)))
 
+(defn- on-ping [{::keys [listener ^ByteBuffer payload]} socket]
+  (when (satisfies? ws/PingListener listener)
+    (ws/on-ping listener socket (.flip payload))))
+
 (defn- deliver-message [{::keys [opcode listener] :as state} socket]
   (case (byte opcode)
     0x1 (on-text   state socket)
     0x2 (on-binary state socket)
     0x8 (on-close  state socket)
+    0x9 (on-ping   state socket)
     0xA (on-pong   state socket))
   (transient {::step :fin+opcode, ::listener listener}))
 
