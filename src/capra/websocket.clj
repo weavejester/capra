@@ -160,13 +160,17 @@
 (defn read-websocket-frame [state socket buffer]
   (loop [state state, changes 0]
     (if-some [new-state
-              (case (::step state)
-                :open          (on-open state socket)
-                :fin+opcode    (read-fin+opcode state buffer)
-                :masked+length (read-masked+length state buffer)
-                :mask          (read-mask state buffer)
-                :payload       (read-payload state buffer)
-                :complete      (deliver-message state socket)
-                nil)]
+              (try
+                (case (::step state)
+                  :open          (on-open state socket)
+                  :fin+opcode    (read-fin+opcode state buffer)
+                  :masked+length (read-masked+length state buffer)
+                  :mask          (read-mask state buffer)
+                  :payload       (read-payload state buffer)
+                  :complete      (deliver-message state socket)
+                  nil)
+                (catch Exception ex
+                  (ws/on-error (::listener state) socket ex)
+                  nil))]
       (recur new-state (inc changes))
       (when (pos? changes) state))))
