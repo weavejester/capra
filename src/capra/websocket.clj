@@ -14,7 +14,7 @@
                       (.putLong buf len))))
 
 (defn- frame-header [^long opcode ^ByteBuffer payload]
-  (doto (ByteBuffer/allocate 14)
+  (doto (ByteBuffer/allocate 10)
     (.put (unchecked-byte (bit-or 0x80 opcode)))
     (put-payload-length (.remaining payload))
     (.flip)))
