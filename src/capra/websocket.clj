@@ -55,16 +55,13 @@
 (defn- high-bit? [^long b]
   (not (zero? (bit-and b 0x80))))
 
-(defn- opcode [^long b]
-  (bit-and b 0x0F))
-
 (defn- read-fin+opcode [state ^ByteBuffer buffer]
   (when (.hasRemaining buffer)
     (let [b (.get buffer)]
       (-> state
           (assoc! ::finished? (high-bit? b))
-          (assoc! ::opcode (opcode b))
-          (assoc! ::step :masked+length)))))
+          (assoc! ::opcode    (bit-and b 0x0F))
+          (assoc! ::step      :masked+length)))))
 
 (defn- get-unsigned-short [^ByteBuffer buffer]
   (when (>= (.remaining buffer) 2)
@@ -89,7 +86,7 @@
         (-> state
             (assoc! ::masked? masked?)
             (assoc! ::payload (ByteBuffer/allocate len))
-            (assoc! ::step (if masked? :mask :payload)))))))
+            (assoc! ::step    (if masked? :mask :payload)))))))
 
 (defn- read-mask [state ^ByteBuffer buffer]
   (when (>= (.remaining buffer) 4)
