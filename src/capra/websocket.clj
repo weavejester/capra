@@ -88,21 +88,31 @@
             (assoc! ::payload (ByteBuffer/allocate len))
             (assoc! ::step    (if masked? :mask :payload)))))))
 
+(defn- int->long-mask [^long mask]
+  (let [mask (bit-and mask 0xFFFFFFFF)]
+    (bit-or (bit-shift-left mask 32) mask)))
+
 (defn- read-mask [state ^ByteBuffer buffer]
   (when (>= (.remaining buffer) 4)
-    (let [mask (byte-array 4)]
-      (.get buffer ^bytes mask)
-      (-> state
-          (assoc! ::mask mask)
-          (assoc! ::step :payload)))))
+    (-> state
+        (assoc! ::mask (int->long-mask (.getInt buffer)))
+        (assoc! ::step :payload))))
 
-(defn- put-masked [^ByteBuffer dest ^ByteBuffer src ^bytes mask]
-  (let [pos   (.position dest)
-        limit (+ pos (.remaining src))]
-    (loop [i pos]
-      (when (< i limit)
-        (.put dest (byte (bit-xor (.get src) (aget mask (mod i 4)))))
-        (recur (inc i))))))
+(defn- put-masked-bytes [^ByteBuffer dest ^ByteBuffer src ^long mask ^long len]
+  (let [p (.position dest)]
+    (dotimes [i len]
+      (let [mask-shift (* 8 (- 3 (bit-and 3 (+ p i))))
+            mask-byte  (unchecked-byte (bit-shift-right mask mask-shift))]
+        (.put dest (unchecked-byte (bit-xor (.get src) mask-byte)))))))
+
+(defn- put-masked [^ByteBuffer dest ^ByteBuffer src ^long mask]
+  (let [len         (min (.remaining dest) (.remaining src))
+        start-bytes (bit-and (- (.position dest)) 7)
+        num-words   (bit-shift-right (- len start-bytes) 3)]
+    (put-masked-bytes dest src mask start-bytes)
+    (dotimes [_ num-words]
+      (.putLong dest (bit-xor (.getLong src) mask)))
+    (put-masked-bytes dest src mask (bit-and (- len start-bytes) 7))))
 
 (defn- read-payload [state ^ByteBuffer buffer]
   (when (.hasRemaining buffer)
