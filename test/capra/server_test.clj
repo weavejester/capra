@@ -711,7 +711,8 @@
                    (fn handler [_request]
                      {:ring.websocket/listener
                       (reify rwp/Listener
-                        (on-open [_ _])
+                        (on-open [_ sock]
+                          (rwp/-send sock "Opened!"))
                         (on-message [_ sock msg]
                           (swap! received conj [:message msg])
                           (rwp/-send sock msg))
@@ -730,5 +731,6 @@
       (is (= [[:message "Hello World"]
               [:exit 1000 "Normal exit"]]
              @received))
-      (is (= [[:message "Hello World"]]
+      (is (= [[:message "Opened!"]
+              [:message "Hello World"]]
              @sent)))))

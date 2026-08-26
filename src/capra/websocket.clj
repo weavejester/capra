@@ -50,7 +50,7 @@
     (tcp/close socket)))
 
 (defn init-websocket [listener]
-  (transient {::step :fin+opcode, ::listener listener}))
+  (transient {::step :open, ::listener listener}))
 
 (defn- high-bit? [^long b]
   (not (zero? (bit-and b 0x80))))
@@ -119,6 +119,10 @@
 (defn- buffer->utf-8 [^ByteBuffer buf]
   (String. (.array buf) (.arrayOffset buf) (.limit buf) StandardCharsets/UTF_8))
 
+(defn- on-open [{::keys [listener] :as state} socket]
+  (ws/on-open listener socket)
+  (assoc! state ::step :fin+opcode))
+
 (defn- on-text [{::keys [listener payload]} socket]
   (ws/on-message listener socket (buffer->utf-8 payload)))
 
@@ -139,12 +143,13 @@
     0x2 (on-binary state socket)
     0x8 (on-close  state socket)
     0xA (on-pong   state socket))
-  (init-websocket listener))
+  (transient {::step :fin+opcode, ::listener listener}))
 
 (defn read-websocket-frame [state socket buffer]
   (loop [state state, changes 0]
     (if-some [new-state
               (case (::step state)
+                :open          (on-open state socket)
                 :fin+opcode    (read-fin+opcode state buffer)
                 :masked+length (read-masked+length state buffer)
                 :mask          (read-mask state buffer)
