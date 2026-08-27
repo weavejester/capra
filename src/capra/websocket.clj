@@ -145,8 +145,9 @@
   (ws/on-pong listener socket (.flip payload)))
 
 (defn- on-ping [{::keys [listener ^ByteBuffer payload]} socket]
+  (ws/-pong socket (-> payload .flip .duplicate))
   (when (satisfies? ws/PingListener listener)
-    (ws/on-ping listener socket (.flip payload))))
+    (ws/on-ping listener socket payload)))
 
 (defn- deliver-message [{::keys [opcode listener] :as state} socket]
   (case (byte opcode)
