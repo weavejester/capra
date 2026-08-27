@@ -55,9 +55,17 @@
 (defn- high-bit? [^long b]
   (not (zero? (bit-and b 0x80))))
 
+(defn- valid-first-byte? [^long b]
+  (case b (0 1 2 -128 -127 -126 -120 -119 -118) true false))
+
+(defn- invalid-first-byte [b]
+  (ex-info (format "Invalid first frame byte: 0x%02X" b)
+           {:error :invalid-first-byte, :byte b, :close-code 1002}))
+
 (defn- read-fin+opcode [state ^ByteBuffer buffer]
   (when (.hasRemaining buffer)
     (let [b (.get buffer)]
+      (when-not (valid-first-byte? b) (throw (invalid-first-byte b)))
       (-> state
           (assoc! ::finished? (high-bit? b))
           (assoc! ::opcode    (bit-and b 0x0F))
@@ -170,8 +178,14 @@
                   :payload       (read-payload state buffer)
                   :complete      (deliver-message state socket)
                   nil)
+                (catch clojure.lang.ExceptionInfo ex
+                  (ws/on-error (::listener state) socket ex)
+                  (ws/-close socket (:close-code (ex-data ex) 1011)
+                             (ex-message ex))
+                  nil)
                 (catch Exception ex
                   (ws/on-error (::listener state) socket ex)
+                  (ws/-close socket 1011 "Internal error")
                   nil))]
       (recur new-state (inc changes))
       (when (pos? changes) state))))
