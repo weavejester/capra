@@ -79,8 +79,18 @@
   (when (>= (.remaining buffer) 8)
     (.getLong buffer)))
 
-(defn- payload-length [^long b ^ByteBuffer buffer]
+(defn- limited-length-opcode? [^long opcode]
+  (case opcode (0x8 0x9 0xA) true false))
+
+(defn- invalid-length [opcode len]
+  (ex-info (format "Frame length %d too long for opcode 0x%01X" len opcode)
+           {:error :invalid-length, :len len, :opcode opcode
+            :close-code 1002}))
+
+(defn- payload-length [{::keys [opcode]} ^long b ^ByteBuffer buffer]
   (let [len (bit-and b 0x7F)]
+    (when (and (> len 125) (limited-length-opcode? opcode))
+      (throw (invalid-length opcode len)))
     (case len
       126 (get-unsigned-short buffer)
       127 (get-long buffer)
@@ -90,7 +100,7 @@
   (when (.hasRemaining buffer)
     (let [b       (.get buffer)
           masked? (high-bit? b)]
-      (when-some [len (payload-length b buffer)]
+      (when-some [len (payload-length state b buffer)]
         (-> state
             (assoc! ::masked? masked?)
             (assoc! ::payload (ByteBuffer/allocate len))
@@ -144,10 +154,17 @@
 (defn- on-binary [{::keys [listener ^ByteBuffer payload]} socket]
   (ws/on-message listener socket (.flip payload)))
 
+(defn- invalid-close-code [code]
+  (ex-info
+   (format "Close code %d is invalid (must be between 1000 and 4999)" code)
+   {:error :invalid-close-code, :code code, :close-code 1002}))
+
 (defn- on-close [{::keys [listener ^ByteBuffer payload]} socket]
-  (let [exit-code (-> payload .flip .getShort)
-        reason    (-> payload .slice buffer->utf-8)]
-    (ws/on-close listener socket exit-code reason)))
+  (let [code (-> payload .flip .getShort)]
+    (when (or (< code 1000) (> code 4999))
+      (throw (invalid-close-code code)))
+    (let [reason (-> payload .slice buffer->utf-8)]
+      (ws/on-close listener socket code reason))))
 
 (defn- on-pong [{::keys [listener ^ByteBuffer payload]} socket]
   (ws/on-pong listener socket (.flip payload)))
@@ -167,25 +184,24 @@
   (transient {::step :fin+opcode, ::listener listener}))
 
 (defn read-websocket-frame [state socket buffer]
-  (loop [state state, changes 0]
-    (if-some [new-state
-              (try
-                (case (::step state)
-                  :open          (on-open state socket)
-                  :fin+opcode    (read-fin+opcode state buffer)
-                  :masked+length (read-masked+length state buffer)
-                  :mask          (read-mask state buffer)
-                  :payload       (read-payload state buffer)
-                  :complete      (deliver-message state socket)
-                  nil)
-                (catch clojure.lang.ExceptionInfo ex
-                  (ws/on-error (::listener state) socket ex)
-                  (ws/-close socket (:close-code (ex-data ex) 1011)
-                             (ex-message ex))
-                  nil)
-                (catch Exception ex
-                  (ws/on-error (::listener state) socket ex)
-                  (ws/-close socket 1011 "Internal error")
-                  nil))]
-      (recur new-state (inc changes))
-      (when (pos? changes) state))))
+  (try (loop [state state, changes 0]
+         (if-some [new-state
+                   (case (::step state)
+                     :open          (on-open state socket)
+                     :fin+opcode    (read-fin+opcode state buffer)
+                     :masked+length (read-masked+length state buffer)
+                     :mask          (read-mask state buffer)
+                     :payload       (read-payload state buffer)
+                     :complete      (deliver-message state socket)
+                     nil)]
+           (recur new-state (inc changes))
+           (when (pos? changes) state)))
+       (catch clojure.lang.ExceptionInfo ex
+         (ws/on-error (::listener state) socket ex)
+         (ws/-close socket (:close-code (ex-data ex) 1011)
+                           (ex-message ex))
+         nil)
+       (catch Exception ex
+         (ws/on-error (::listener state) socket ex)
+         (ws/-close socket 1011 "Internal error")
+         nil)))
