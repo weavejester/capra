@@ -704,6 +704,28 @@
                     "[\"/foobar\" \"\"]")
                (str/replace response #"Date: (.*?)\r\n" "")))))))
 
+(deftest large-request-body-test
+  (let [large-body (byte-array (* 20 1024 1024))]
+    (.nextBytes (java.util.Random. 42) large-body)
+    (with-open [_ (capra/run-server
+                   (fn handler [{:keys [^java.io.InputStream body]}]
+                     {:status  200
+                      :headers {"Content-Type" "application/octet-stream"}
+                      :body    (.readAllBytes body)})
+                   {:port 4355})]
+      (let [response (http/post "http://localhost:4355"
+                                {:body large-body :as :byte-array
+                                 :timeout 5000})]
+        (is (= {:status  200
+                :headers {"content-type"   "application/octet-stream"
+                          "content-length" (str (count large-body))
+                          "server"         "Capra"}}
+               (-> response
+                   (select-keys [:status :headers])
+                   (update :headers dissoc "date"))))
+        (is (= (sha256sum large-body)
+               (sha256sum (:body response))))))))
+
 (deftest websocket-test
   (let [received (atom [])
         sent     (atom [])]
