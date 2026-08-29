@@ -124,29 +124,31 @@
         (assoc! ::step :payload))))
 
 (defn- put-masked-bytes [^ByteBuffer dest ^ByteBuffer src ^long mask ^long len]
-  (let [p (.position dest)]
-    (dotimes [i len]
-      (let [mask-shift (* 8 (- 3 (bit-and 3 (+ p i))))
-            mask-byte  (unchecked-byte (bit-shift-right mask mask-shift))]
-        (.put dest (unchecked-byte (bit-xor (.get src) mask-byte)))))))
+  (when (pos? len)
+    (let [p (.position dest)]
+      (dotimes [i len]
+        (let [mask-shift (* 8 (- 3 (bit-and 3 (+ p i))))
+              mask-byte  (unchecked-byte (bit-shift-right mask mask-shift))]
+          (.put dest (unchecked-byte (bit-xor (.get src) mask-byte))))))))
 
 (defn- put-masked [^ByteBuffer dest ^ByteBuffer src ^long mask]
-  (let [len         (min (.remaining dest) (.remaining src))
-        start-bytes (bit-and (- (.position dest)) 7)
-        num-words   (bit-shift-right (- len start-bytes) 3)]
-    (put-masked-bytes dest src mask start-bytes)
-    (dotimes [_ num-words]
-      (.putLong dest (bit-xor (.getLong src) mask)))
-    (put-masked-bytes dest src mask (bit-and (- len start-bytes) 7))))
+  (let [len (min (.remaining dest) (.remaining src))]
+    (when (pos? len)
+      (let [start-bytes (min len (bit-and (- (.position dest)) 7))
+            num-words   (bit-shift-right (- len start-bytes) 3)]
+        (put-masked-bytes dest src mask start-bytes)
+        (dotimes [_ num-words]
+          (.putLong dest (bit-xor (.getLong src) mask)))
+        (put-masked-bytes dest src mask (bit-and (- len start-bytes) 7))))))
 
 (defn- read-payload [state ^ByteBuffer buffer]
   (when (.hasRemaining buffer)
     (let [^ByteBuffer payload (::payload state)]
       (if-some [mask (::mask state)]
         (put-masked payload buffer mask)
-        (.put payload buffer)))
-    (when-not (.hasRemaining buffer)
-      (assoc! state ::step (if (::finished? state) :complete :fin+opcode)))))
+        (.put payload buffer))
+      (when-not (.hasRemaining payload)
+        (assoc! state ::step (if (::finished? state) :complete :fin+opcode))))))
 
 (defn- buffer->utf-8 [^ByteBuffer buf]
   (String. (.array buf) (.arrayOffset buf) (.limit buf) StandardCharsets/UTF_8))
@@ -207,7 +209,7 @@
        (catch clojure.lang.ExceptionInfo ex
          (ws/on-error (::listener state) socket ex)
          (ws/-close socket (:close-code (ex-data ex) 1011)
-                           (ex-message ex))
+                    (ex-message ex))
          nil)
        (catch Exception ex
          (ws/on-error (::listener state) socket ex)
