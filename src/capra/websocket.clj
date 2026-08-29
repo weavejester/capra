@@ -96,11 +96,18 @@
       127 (get-long buffer)
       len)))
 
-(defn- read-masked+length [state ^ByteBuffer buffer]
+(defn- message-too-big [len max-len]
+  (ex-info (format "Message length %s exceeds max length %d" len max-len)
+           {:error :message-too-big, :len len, :max-len max-len
+            :close-code 1009}))
+
+(defn- read-masked+length [state ^ByteBuffer buffer max-len]
   (when (.hasRemaining buffer)
     (let [b       (.get buffer)
           masked? (high-bit? b)]
       (when-some [len (payload-length state b buffer)]
+        (when (and max-len (> len max-len))
+          (throw (message-too-big len max-len)))
         (-> state
             (assoc! ::masked? masked?)
             (assoc! ::payload (ByteBuffer/allocate len))
@@ -183,13 +190,14 @@
     0xA (on-pong   state socket))
   (transient {::step :fin+opcode, ::listener listener}))
 
-(defn read-websocket-frame [state socket buffer]
+(defn read-websocket-frame
+  [state socket buffer {max-len :ws-message-max-size}]
   (try (loop [state state, changes 0]
          (if-some [new-state
                    (case (::step state)
                      :open          (on-open state socket)
                      :fin+opcode    (read-fin+opcode state buffer)
-                     :masked+length (read-masked+length state buffer)
+                     :masked+length (read-masked+length state buffer max-len)
                      :mask          (read-mask state buffer)
                      :payload       (read-payload state buffer)
                      :complete      (deliver-message state socket)

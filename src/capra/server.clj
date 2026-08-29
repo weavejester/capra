@@ -40,7 +40,8 @@
    :port                 80
    :read-buffer-size     8192
    :response-buffer-size 32768
-   :stream-buffer-size   8192})
+   :stream-buffer-size   8192
+   :ws-message-max-size  67108864})
 
 (defn run-server
   "Start a web server in a new thread with the supplied Ring handler and
@@ -69,7 +70,8 @@
   - `:stream-buffer-size` - the size of the buffer used to read in the body of
     the request when streaming (defaults to 8K)
   - `:write-buffer-size` - the write buffer size in bytes (default 32K)
-  - `:write-queue-size` - the max number of writes in the queue (default 64)"
+  - `:write-queue-size` - the max number of writes in the queue (default 64)
+  - `:ws-message-max-size - the max size of a websocket message (defualt 64M)"
   ^Closeable [handler & {:as options}]
   (let [options (merge (new-default-options) options)
         handler (if (:async? options)
