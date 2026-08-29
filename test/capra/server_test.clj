@@ -5,7 +5,8 @@
             [clojure.test :refer [deftest is testing]]
             [hato.client :as http]
             [hato.websocket :as ws]
-            [ring.websocket.protocols :as rwp]))
+            [ring.websocket.protocols :as rwp])
+  (:import [java.nio ByteBuffer]))
 
 (defn- raw-http-stream [^String host ^long port f]
   (with-open [socket (java.net.Socket. host port)
@@ -757,9 +758,9 @@
                   "20")
              (str/replace response #"Date: (.*?)\r\n" ""))))))
 
-(deftest websocket-test
-  (let [received (atom [])
-        sent     (atom [])]
+(deftest websocket-send-receive-test
+  (let [server (atom [])
+        client (atom [])]
     (with-open [_ (capra/run-server
                    (fn handler [_request]
                      {:ring.websocket/listener
@@ -767,23 +768,63 @@
                         (on-open [_ sock]
                           (rwp/-send sock "Opened!"))
                         (on-message [_ sock msg]
-                          (swap! received conj [:message msg])
+                          (swap! server conj [:message msg])
                           (rwp/-send sock msg))
                         (on-pong [_ _ _])
                         (on-error [_ _ _])
                         (on-close [_ _ code reason]
-                          (swap! received conj [:exit code reason])))})
+                          (swap! server conj [:exit code reason])))})
                    {:port 4354})]
       (let [ws @(ws/websocket "ws://localhost:4354"
                               {:on-message
                                (fn [_ msg _]
-                                 (swap! sent conj [:message (str msg)]))})]
+                                 (swap! client conj [:message (str msg)]))})]
         (ws/send! ws "Hello World")
         (ws/close! ws 1000 "Normal exit"))
       (Thread/sleep 10)
       (is (= [[:message "Hello World"]
               [:exit 1000 "Normal exit"]]
-             @received))
+             @server))
       (is (= [[:message "Opened!"]
               [:message "Hello World"]]
-             @sent)))))
+             @client)))))
+
+(deftest websocket-ping-pong-test
+  (let [server (atom [])
+        client (atom [])]
+    (with-open [_ (capra/run-server
+                   (fn handler [_request]
+                     {:ring.websocket/listener
+                      (reify rwp/Listener
+                        (on-open [_ sock]
+                          (rwp/-ping sock
+                                     (ByteBuffer/wrap (byte-array [4 5 6]))))
+                        (on-message [_ _ _])
+                        (on-pong [_ _ msg]
+                          (swap! server conj
+                                 [:pong (-> ^ByteBuffer msg .array seq)]))
+                        (on-error [_ _ _])
+                        (on-close [_ _ _ _])
+                        rwp/PingListener
+                        (on-ping [_ _ msg]
+                          (swap! server conj
+                                 [:ping (-> ^ByteBuffer msg .array seq)])))})
+                   {:port 4357})]
+      (let [ws @(ws/websocket
+                 "ws://localhost:4357"
+                 {:on-ping
+                  (fn [_ ^ByteBuffer msg]
+                    (swap! client conj [:ping (-> msg .array seq)]))
+                  :on-pong
+                  (fn [_ ^ByteBuffer msg]
+                    (swap! client conj [:pong (-> msg .array seq)]))})]
+        (Thread/sleep 10)
+        (ws/ping! ws (ByteBuffer/wrap (byte-array [1 2 3])))
+        (ws/close! ws 1000 "Normal exit"))
+      (Thread/sleep 10)
+      (is (= [[:pong [4 5 6]]
+              [:ping [1 2 3]]]
+             @server))
+      (is (= [[:ping [4 5 6]]
+              [:pong [1 2 3]]]
+             @client)))))
