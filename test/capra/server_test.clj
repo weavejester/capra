@@ -7,13 +7,17 @@
             [hato.websocket :as ws]
             [ring.websocket.protocols :as rwp]))
 
-(defn- raw-http-request [^String host ^long port ^String raw-request]
+(defn- raw-http-stream [^String host ^long port f]
   (with-open [socket (java.net.Socket. host port)
               writer (io/writer (.getOutputStream socket) :encoding "US-ASCII")]
     (.setSoTimeout socket 1000)
-    (.write writer raw-request)
-    (.flush writer)
+    (f writer)
     (slurp (.getInputStream socket) :encoding "US-ASCII")))
+
+(defn- raw-http-request [host port ^String raw-request]
+  (raw-http-stream host port (fn [^java.io.Writer w]
+                               (.write w raw-request)
+                               (.flush w))))
 
 (defn- sha256sum [^bytes bs]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
@@ -725,6 +729,33 @@
                    (update :headers dissoc "date"))))
         (is (= (sha256sum large-body)
                (sha256sum (:body response))))))))
+
+(deftest chunked-body-split-across-reads-test
+  (with-open [_ (capra/run-server
+                 (fn handler [{:keys [body]}]
+                   {:status  200
+                    :headers {"Content-Type" "text/plain"}
+                    :body    (slurp body)})
+                 {:port 4356})]
+    (let [response (raw-http-stream
+                    "localhost" 4356
+                    (fn [^java.io.Writer writer]
+                      (.write writer (str "POST / HTTP/1.1\r\n"
+                                          "Host: localhost\r\n"
+                                          "Transfer-Encoding: chunked\r\n"
+                                          "Connection: close\r\n\r\n"
+                                          "2\r\n20"))
+                      (.flush writer)
+                      (Thread/sleep 200)
+                      (.write writer "\r\n0\r\n\r\n")
+                      (.flush writer)))]
+      (is (= (str "HTTP/1.1 200 OK\r\n"
+                  "Connection: close\r\n"
+                  "Server: Capra\r\n"
+                  "Content-Type: text/plain\r\n"
+                  "Content-Length: 2\r\n\r\n"
+                  "20")
+             (str/replace response #"Date: (.*?)\r\n" ""))))))
 
 (deftest websocket-test
   (let [received (atom [])

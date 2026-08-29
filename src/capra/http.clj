@@ -470,7 +470,7 @@
     (when-some [head (buf/read-line chunked-buffer StandardCharsets/US_ASCII)]
       (let [start  (.position chunked-buffer)
             length (Long/parseLong head 16)]
-        (when (<= (+ length 2) (.remaining buffer))
+        (when (<= (+ length 2) (.remaining chunked-buffer))
           (.position buffer (+ start length 2))
           (doto chunked-buffer (.limit (+ start length))))))))
 
