@@ -1,7 +1,8 @@
 (ns capra.websocket
   (:require [ring.websocket.protocols :as ws]
             [teensyp.server :as tcp])
-  (:import [java.nio ByteBuffer]
+  (:import [java.util ArrayList]
+           [java.nio ByteBuffer]
            [java.nio.charset StandardCharsets]
            [java.nio.channels SelectionKey]))
 
@@ -66,10 +67,15 @@
   (when (.hasRemaining buffer)
     (let [b (.get buffer)]
       (when-not (valid-first-byte? b) (throw (invalid-first-byte b)))
-      (-> state
-          (assoc! ::finished? (high-bit? b))
-          (assoc! ::opcode    (bit-and b 0x0F))
-          (assoc! ::step      :masked+length)))))
+      (let [finished? (high-bit? b)
+            opcode    (bit-and b 0x0F)]
+        (-> state
+            (assoc! ::step :masked+length)
+            (assoc! ::finished? finished?)
+            (assoc! ::opcode opcode)
+            (cond-> (and (not finished?) (not (zero? opcode)))
+              (-> (assoc! ::cont-opcode opcode)
+                  (assoc! ::cont-payloads (ArrayList.)))))))))
 
 (defn- get-unsigned-short [^ByteBuffer buffer]
   (when (>= (.remaining buffer) 2)
@@ -141,6 +147,19 @@
           (.putLong dest (bit-xor (.getLong src) mask)))
         (put-masked-bytes dest src mask (bit-and (- len start-bytes) 7))))))
 
+(defn- total-payload-size [^ArrayList payloads]
+  (loop [i (dec (.size payloads)), n 0]
+    (if (>= i 0)
+      (recur (dec i) (+ n (.limit ^ByteBuffer (.get payloads i))))
+      n)))
+
+(defn- concat-payloads [{::keys [^ByteBuffer payload ^ArrayList cont-payloads]}]
+  (let [len (+ (.limit payload) (total-payload-size cont-payloads))
+        buf (ByteBuffer/allocate len)]
+    (dotimes [i (.size cont-payloads)]
+      (.put buf (.flip ^ByteBuffer (.get cont-payloads i))))
+    (.put buf (.flip payload))))
+
 (defn- read-payload [state ^ByteBuffer buffer]
   (when (.hasRemaining buffer)
     (let [^ByteBuffer payload (::payload state)]
@@ -148,7 +167,16 @@
         (put-masked payload buffer mask)
         (.put payload buffer))
       (when-not (.hasRemaining payload)
-        (assoc! state ::step (if (::finished? state) :complete :fin+opcode))))))
+        (if (::finished? state)
+          (if-some [opcode (::cont-opcode state)]
+            (-> state
+                (assoc! ::step :complete)
+                (assoc! ::opcode opcode)
+                (assoc! ::payload (concat-payloads state)))
+            (assoc! state ::step :complete))
+          (do (when-some [^ArrayList cont-payloads (::cont-payloads state)]
+                (.add cont-payloads payload))
+              (assoc! state ::step :fin+opcode)))))))
 
 (defn- buffer->utf-8 [^ByteBuffer buf]
   (String. (.array buf) (.arrayOffset buf) (.limit buf) StandardCharsets/UTF_8))
@@ -173,7 +201,8 @@
     (when (or (< code 1000) (> code 4999))
       (throw (invalid-close-code code)))
     (let [reason (-> payload .slice buffer->utf-8)]
-      (ws/on-close listener socket code reason))))
+      (ws/on-close listener socket code reason)
+      (ws/-close socket code reason))))
 
 (defn- on-pong [{::keys [listener ^ByteBuffer payload]} socket]
   (ws/on-pong listener socket (.flip payload)))
@@ -207,11 +236,13 @@
            (recur new-state (inc changes))
            (when (pos? changes) state)))
        (catch clojure.lang.ExceptionInfo ex
+         (prn ex)
          (ws/on-error (::listener state) socket ex)
          (ws/-close socket (:close-code (ex-data ex) 1011)
                     (ex-message ex))
          nil)
        (catch Exception ex
+         (prn ex)
          (ws/on-error (::listener state) socket ex)
          (ws/-close socket 1011 "Internal error")
          nil)))

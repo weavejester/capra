@@ -6,19 +6,44 @@
             [hato.client :as http]
             [hato.websocket :as ws]
             [ring.websocket.protocols :as rwp])
-  (:import [java.nio ByteBuffer]))
+  (:import [java.io BufferedReader OutputStream]
+           [java.net Socket]
+           [java.nio ByteBuffer]))
 
 (defn- raw-http-stream [^String host ^long port f]
-  (with-open [socket (java.net.Socket. host port)
-              writer (io/writer (.getOutputStream socket) :encoding "US-ASCII")]
+  (with-open [socket (Socket. host port)]
     (.setSoTimeout socket 1000)
-    (f writer)
+    (f (.getOutputStream socket))
     (slurp (.getInputStream socket) :encoding "US-ASCII")))
 
 (defn- raw-http-request [host port ^String raw-request]
-  (raw-http-stream host port (fn [^java.io.Writer w]
-                               (.write w raw-request)
-                               (.flush w))))
+  (raw-http-stream host port
+                   (fn [^OutputStream out]
+                     (let [w (io/writer out :encoding "US-ASCII")]
+                       (.write w raw-request)
+                       (.flush w)))))
+
+(defn- raw-ws-bytes [^String host ^long port octets]
+  (with-open [socket (Socket. host port)]
+    (.setSoTimeout socket 1000)
+    (let [out (.getOutputStream socket)
+          in  (.getInputStream socket)
+          w   (io/writer out :encoding "US-ASCII")
+          r   (io/reader in :encoding "US-ASCII")]
+      (.write w (str "GET / HTTP/1.1\r\n"
+                     "Host: " host "\r\n"
+                     "Upgrade: websocket\r\n"
+                     "Connection: Upgrade\r\n"
+                     "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n"))
+      (.flush w)
+      (.write out (byte-array (map unchecked-byte octets)))
+      (.flush out)
+      (while (not= "" (.readLine ^BufferedReader r)))
+      (loop [out-bytes []]
+        (let [b (.read in)]
+          (if (>= b 0)
+            (recur (conj out-bytes (bit-and b 0xFF)))
+            out-bytes))))))
 
 (defn- sha256sum [^bytes bs]
   (let [digest (java.security.MessageDigest/getInstance "SHA-256")]
@@ -740,16 +765,17 @@
                  {:port 4356})]
     (let [response (raw-http-stream
                     "localhost" 4356
-                    (fn [^java.io.Writer writer]
-                      (.write writer (str "POST / HTTP/1.1\r\n"
-                                          "Host: localhost\r\n"
-                                          "Transfer-Encoding: chunked\r\n"
-                                          "Connection: close\r\n\r\n"
-                                          "2\r\n20"))
-                      (.flush writer)
-                      (Thread/sleep 200)
-                      (.write writer "\r\n0\r\n\r\n")
-                      (.flush writer)))]
+                    (fn [^OutputStream out]
+                      (let [w (io/writer out :encoding "US-ASCII")]
+                        (.write w (str "POST / HTTP/1.1\r\n"
+                                       "Host: localhost\r\n"
+                                       "Transfer-Encoding: chunked\r\n"
+                                       "Connection: close\r\n\r\n"
+                                       "2\r\n20"))
+                        (.flush w)
+                        (Thread/sleep 200)
+                        (.write w "\r\n0\r\n\r\n")
+                        (.flush w))))]
       (is (= (str "HTTP/1.1 200 OK\r\n"
                   "Connection: close\r\n"
                   "Server: Capra\r\n"
@@ -828,3 +854,27 @@
       (is (= [[:ping [4 5 6]]
               [:pong [1 2 3]]]
              @client)))))
+
+(deftest websocket-multiple-frame-test
+  (with-open [_ (capra/run-server
+                 (fn handler [_request]
+                   {:ring.websocket/listener
+                    (reify rwp/Listener
+                      (on-open [_ _])
+                      (on-message [_ sock msg]
+                        (rwp/-send sock msg))
+                      (on-pong [_ _ _])
+                      (on-error [_ _ _])
+                      (on-close [_ _ _ _]))})
+                 {:port 4358})]
+    (is (= [;; frame 1: text "foobar" unmasked
+            0x81 0x06 0x66 0x6F 0x6F 0x62 0x61 0x72
+            ;; frame 2: answering close frame
+            0x88 0x02 0x03 0xE8]
+           (raw-ws-bytes "localhost" 4358
+                         [;; frame 1: text "foo" masked with 37 FA 21 3D
+                          0x01 0x83 0x37 0xFA 0x21 0x3D 0x51 0x95 0x4E
+                          ;; frame 2: continuation "bar" masked with 12 34 56 78
+                          0x80 0x83 0x12 0x34 0x56 0x78 0x70 0x55 0x24
+                          ;; frame 3: normal close frame
+                          0x88 0x82 0x37 0xFA 0x21 0x3D 0x34 0x12])))))
